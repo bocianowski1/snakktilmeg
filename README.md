@@ -12,15 +12,22 @@ Small macOS dictation helper. Press the global hotkey once to start recording, p
   - CLI: `~/code/div/whisper.cpp/build/bin/whisper-cli`
   - Model: `~/code/div/whisper.cpp/models/ggml-base.en.bin`
 
-Those `whisper.cpp` paths are currently hardcoded in `main.py`.
-
 ## Setup
 
 ```sh
 uv sync
+cp .env.example .env
 ```
 
-If `whisper.cpp` is not already built, build it and download the expected model in that repository before running this app.
+Edit `.env` if your `whisper.cpp` checkout or model live somewhere else:
+
+```sh
+WHISPER_REPO_PATH=~/code/div/whisper.cpp
+WHISPER_MODEL_PATH=~/code/div/whisper.cpp/models/ggml-base.en.bin
+HOTKEY=<ctrl>+<alt>+<space>
+```
+
+If `whisper.cpp` is not already built, build it and download the configured model before running this app. The app derives the CLI path as `WHISPER_REPO_PATH/build/bin/whisper-cli`.
 
 ## Run
 
@@ -28,7 +35,7 @@ If `whisper.cpp` is not already built, build it and download the expected model 
 uv run python main.py
 ```
 
-Default hotkey: `Ctrl` + `Alt` + `Space`.
+Default hotkey: `Ctrl` + `Alt` + `Space`. Configure it with `HOTKEY` in `.env` using `pynput.keyboard.HotKey.parse` syntax, for example `<ctrl>+<alt>+<space>`.
 
 Use the hotkey once to start recording and again to stop. While transcription is running, additional hotkey presses are ignored. Logs are emitted as JSON on stderr/stdout depending on the logging handler stream.
 

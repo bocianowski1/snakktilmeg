@@ -29,3 +29,7 @@ class TextInsertionError(SnakktilmegError):
 
 class HotkeyError(SnakktilmegError):
     pass
+
+
+class ConfigurationError(SnakktilmegError):
+    pass
