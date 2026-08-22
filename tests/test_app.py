@@ -11,12 +11,16 @@ class FakeRecorder:
         self.calls: list[Path] = []
         self.started = 0
         self.stopped: list[Path] = []
+        self.discarded = 0
 
     def start_recording(self) -> None:
         self.started += 1
 
     def stop_recording(self, path: Path) -> None:
         self.stopped.append(path)
+
+    def discard_recording(self) -> None:
+        self.discarded += 1
 
     def record_wav_until_enter(
         self,
@@ -42,6 +46,15 @@ class FakeTextInserter:
 
     def insert(self, text: str) -> None:
         self.calls.append(text)
+
+
+class InterruptingListener:
+    def __init__(self, before_interrupt: Callable[[Callable[[], None]], None]) -> None:
+        self.before_interrupt = before_interrupt
+
+    def run(self, on_press: Callable[[], None]) -> None:
+        self.before_interrupt(on_press)
+        raise KeyboardInterrupt
 
 
 def test_app_records_then_transcribes_outputs_and_inserts_result(tmp_path) -> None:
@@ -213,3 +226,99 @@ def test_hotkey_ignores_presses_while_transcribing(tmp_path, caplog) -> None:
         "transcript_ready",
     ]
     assert caplog.records[2].reason == "busy"
+
+
+def test_ctrl_c_while_idle_exits_cleanly(tmp_path, caplog) -> None:
+    recorder = FakeRecorder()
+    app = App(
+        recorder=recorder,
+        transcriber=FakeTranscriber(),
+        text_inserter=FakeTextInserter(),
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.run_hotkey_loop(InterruptingListener(lambda on_press: None), tmp_path)
+
+    assert recorder.started == 0
+    assert recorder.stopped == []
+    assert recorder.discarded == 0
+    assert [record.event for record in caplog.records] == [
+        "hotkey_listener_ready",
+        "shutdown_requested",
+        "shutdown_complete",
+    ]
+
+
+def test_ctrl_c_while_recording_discards_audio(tmp_path, caplog) -> None:
+    recorder = FakeRecorder()
+    transcriber = FakeTranscriber()
+    text_inserter = FakeTextInserter()
+    app = App(
+        recorder=recorder,
+        transcriber=transcriber,
+        text_inserter=text_inserter,
+    )
+    path = tmp_path / "recording.wav"
+
+    with caplog.at_level(logging.INFO):
+        app.run_hotkey_loop(InterruptingListener(lambda on_press: on_press()), path)
+        app.handle_hotkey(path)
+
+    assert recorder.started == 2
+    assert recorder.stopped == []
+    assert recorder.discarded == 1
+    assert transcriber.calls == []
+    assert text_inserter.calls == []
+    assert [record.event for record in caplog.records] == [
+        "hotkey_listener_ready",
+        "recording_started",
+        "shutdown_requested",
+        "recording_discarded",
+        "shutdown_complete",
+        "recording_started",
+    ]
+
+
+def test_ctrl_c_while_transcribing_waits_for_pending_work(tmp_path, caplog) -> None:
+    transcribe_started = threading.Event()
+    can_finish = threading.Event()
+
+    class BlockingTranscriber(FakeTranscriber):
+        def transcribe(self, audio_path: Path) -> str:
+            self.calls.append(audio_path)
+            transcribe_started.set()
+            can_finish.wait(timeout=5)
+            return self.transcript
+
+    def start_stop_then_interrupt(on_press: Callable[[], None]) -> None:
+        on_press()
+        on_press()
+        assert transcribe_started.wait(timeout=5)
+        threading.Timer(0.01, can_finish.set).start()
+
+    recorder = FakeRecorder()
+    transcriber = BlockingTranscriber()
+    text_inserter = FakeTextInserter()
+    path = tmp_path / "recording.wav"
+    app = App(
+        recorder=recorder,
+        transcriber=transcriber,
+        text_inserter=text_inserter,
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.run_hotkey_loop(InterruptingListener(start_stop_then_interrupt), path)
+
+    assert recorder.started == 1
+    assert recorder.stopped == [path]
+    assert recorder.discarded == 0
+    assert transcriber.calls == [path]
+    assert text_inserter.calls == ["hello"]
+    assert [record.event for record in caplog.records] == [
+        "hotkey_listener_ready",
+        "recording_started",
+        "transcribing_started",
+        "shutdown_requested",
+        "transcript_ready",
+        "shutdown_complete",
+    ]

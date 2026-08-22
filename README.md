@@ -32,6 +32,8 @@ Default hotkey: `Ctrl` + `Alt` + `Space`.
 
 Use the hotkey once to start recording and again to stop. While transcription is running, additional hotkey presses are ignored. Logs are emitted as JSON on stderr/stdout depending on the logging handler stream.
 
+Press `Ctrl-C` in the terminal to shut the app down cleanly. If the app is only listening for the hotkey, it exits immediately. If a recording is active, the partial audio is discarded without transcription or paste. If transcription or paste is already in progress, shutdown waits for that work to finish before exiting.
+
 ## Tests
 
 Run the unit test suite:
@@ -46,6 +48,6 @@ Optional type check:
 uv run pyright
 ```
 
-Current tests cover the app orchestration, hotkey state transitions, empty transcript handling, WAV writing, `whisper.cpp` command construction/output parsing, macOS paste command construction, JSON log formatting, and timing logs.
+Current tests cover the app orchestration, hotkey state transitions, graceful `Ctrl-C` shutdown behavior, structured error handling, empty transcript handling, WAV writing, `whisper.cpp` command construction/output parsing, macOS paste command construction, JSON log formatting, and timing logs.
 
 Coverage is mostly unit-level with fakes. The suite does not fully exercise real microphone input, real global hotkeys, real `whisper.cpp` execution, or macOS accessibility/clipboard integration end to end.

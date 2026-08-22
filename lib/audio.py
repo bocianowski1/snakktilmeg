@@ -72,13 +72,8 @@ class SoundDeviceRecorder:
         if self._stream is None or self._chunks is None:
             raise RuntimeError("no recording in progress")
 
-        stream = self._stream
         chunks = self._chunks
-        self._stream = None
-        self._chunks = None
-
-        stream.stop()
-        stream.close()
+        self._close_stream()
         if chunks.empty():
             raise RuntimeError("no audio captured")
 
@@ -92,6 +87,20 @@ class SoundDeviceRecorder:
             sample_rate=self.sample_rate,
             channels=self.channels,
         )
+
+    def discard_recording(self) -> None:
+        self._close_stream()
+
+    def _close_stream(self) -> None:
+        stream = self._stream
+        self._stream = None
+        self._chunks = None
+
+        if stream is None:
+            return
+
+        stream.stop()
+        stream.close()
 
     def record_wav_until_enter(
         self,

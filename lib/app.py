@@ -13,6 +13,8 @@ class Recorder(Protocol):
 
     def stop_recording(self, path: Path) -> None: ...
 
+    def discard_recording(self) -> None: ...
+
     def record_wav_until_enter(
         self,
         path: Path,
@@ -69,7 +71,10 @@ class App:
             "hotkey listener ready",
             extra={"event": "hotkey_listener_ready"},
         )
-        listener.run(lambda: self.handle_hotkey(out_path))
+        try:
+            listener.run(lambda: self.handle_hotkey(out_path))
+        except KeyboardInterrupt:
+            self.shutdown()
 
     def handle_hotkey(self, out_path: Path = DEFAULT_HOTKEY_RECORDING_PATH) -> None:
         with self._lock:
@@ -105,6 +110,35 @@ class App:
         worker = self._worker
         if worker is not None:
             worker.join()
+
+    def shutdown(self) -> None:
+        self.logger.info(
+            "shutdown requested",
+            extra={"event": "shutdown_requested"},
+        )
+
+        worker: threading.Thread | None = None
+        discard_recording = False
+        with self._lock:
+            if self._state == "recording":
+                self._state = "idle"
+                discard_recording = True
+            elif self._state == "transcribing":
+                worker = self._worker
+
+        if discard_recording:
+            self.recorder.discard_recording()
+            self.logger.info(
+                "recording discarded",
+                extra={"event": "recording_discarded"},
+            )
+        if worker is not None:
+            worker.join()
+
+        self.logger.info(
+            "shutdown complete",
+            extra={"event": "shutdown_complete"},
+        )
 
     def _finish_recording(self, out_path: Path) -> None:
         try:
