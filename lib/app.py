@@ -1,8 +1,11 @@
 from collections.abc import Callable
+import logging
 from pathlib import Path
 import tempfile
 import threading
 from typing import Protocol
+
+from lib.logging import get_logger
 
 
 class Recorder(Protocol):
@@ -43,12 +46,12 @@ class App:
         recorder: Recorder,
         transcriber: Transcriber,
         text_inserter: TextInserter | None = None,
-        output: Callable[[str], None] = print,
+        logger: logging.Logger | None = None,
     ) -> None:
         self.recorder = recorder
         self.transcriber = transcriber
         self.text_inserter = text_inserter or NullTextInserter()
-        self.output = output
+        self.logger = logger or get_logger(__name__)
         self._state = "idle"
         self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
@@ -62,7 +65,10 @@ class App:
         listener: HotkeyListener,
         out_path: Path = DEFAULT_HOTKEY_RECORDING_PATH,
     ) -> None:
-        self.output("hotkey listener ready")
+        self.logger.info(
+            "hotkey listener ready",
+            extra={"event": "hotkey_listener_ready"},
+        )
         listener.run(lambda: self.handle_hotkey(out_path))
 
     def handle_hotkey(self, out_path: Path = DEFAULT_HOTKEY_RECORDING_PATH) -> None:
@@ -71,11 +77,17 @@ class App:
             if state == "idle":
                 self.recorder.start_recording()
                 self._state = "recording"
-                self.output("recording...")
+                self.logger.info(
+                    "recording started",
+                    extra={"event": "recording_started"},
+                )
                 return
             if state == "recording":
                 self._state = "transcribing"
-                self.output("transcribing...")
+                self.logger.info(
+                    "transcribing started",
+                    extra={"event": "transcribing_started"},
+                )
                 self._worker = threading.Thread(
                     target=self._finish_recording,
                     args=(out_path,),
@@ -84,7 +96,10 @@ class App:
                 self._worker.start()
                 return
 
-        self.output("busy")
+        self.logger.info(
+            "hotkey ignored",
+            extra={"event": "hotkey_ignored", "reason": "busy"},
+        )
 
     def wait_for_pending_work(self) -> None:
         worker = self._worker
@@ -101,6 +116,9 @@ class App:
 
     def _transcribe_output_and_insert(self, out_path: Path) -> None:
         transcript = self.transcriber.transcribe(out_path)
-        self.output(transcript)
+        self.logger.info(
+            "transcript ready",
+            extra={"event": "transcript_ready", "transcript": transcript},
+        )
         if transcript:
             self.text_inserter.insert(transcript)

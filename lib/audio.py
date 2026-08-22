@@ -1,10 +1,13 @@
 from collections.abc import Callable
+import logging
 from pathlib import Path
 import queue
 import wave
 from typing import Any
 
 import numpy as np
+
+from lib.logging import get_logger
 
 
 AudioBuffer = np.ndarray
@@ -25,9 +28,15 @@ def write_wav(
 
 
 class SoundDeviceRecorder:
-    def __init__(self, sample_rate: int = 16_000, channels: int = 1) -> None:
+    def __init__(
+        self,
+        sample_rate: int = 16_000,
+        channels: int = 1,
+        logger: logging.Logger | None = None,
+    ) -> None:
         self.sample_rate = sample_rate
         self.channels = channels
+        self.logger = logger or get_logger(__name__)
         self._chunks: queue.Queue[AudioBuffer] | None = None
         self._stream: Any | None = None
 
@@ -43,7 +52,10 @@ class SoundDeviceRecorder:
             indata: AudioBuffer, frames: int, time: object, status: object
         ) -> None:
             if status:
-                print(status)
+                self.logger.warning(
+                    "audio input status",
+                    extra={"event": "audio_input_status", "status": str(status)},
+                )
             chunks.put(indata.copy())
 
         stream = sd.InputStream(
@@ -86,7 +98,10 @@ class SoundDeviceRecorder:
         path: Path,
         wait_for_stop: Callable[[], str] = input,
     ) -> None:
-        print("recording... press Enter to stop")
+        self.logger.info(
+            "recording prompt",
+            extra={"event": "recording_prompt", "prompt": "press Enter to stop"},
+        )
         self.start_recording()
         try:
             wait_for_stop()

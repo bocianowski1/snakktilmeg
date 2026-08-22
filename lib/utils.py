@@ -1,6 +1,8 @@
 from functools import wraps
 from time import perf_counter
 
+from lib.logging import get_logger
+
 
 def timed(func):
     @wraps(func)
@@ -9,6 +11,13 @@ def timed(func):
         try:
             return func(*args, **kwargs)
         finally:
-            print(f"{func.__name__} took {perf_counter() - start:.3f}s")
+            get_logger(func.__module__).info(
+                "function timed",
+                extra={
+                    "event": "function_timed",
+                    "function": func.__name__,
+                    "duration_seconds": perf_counter() - start,
+                },
+            )
 
     return wrapper

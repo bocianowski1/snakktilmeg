@@ -1,4 +1,5 @@
 from collections.abc import Callable
+import logging
 from pathlib import Path
 import threading
 
@@ -47,109 +48,134 @@ def test_app_records_then_transcribes_outputs_and_inserts_result(tmp_path) -> No
     recorder = FakeRecorder()
     transcriber = FakeTranscriber()
     text_inserter = FakeTextInserter()
-    output: list[str] = []
     path = tmp_path / "recording.wav"
 
     App(
         recorder=recorder,
         transcriber=transcriber,
         text_inserter=text_inserter,
-        output=output.append,
     ).run(path)
 
     assert recorder.calls == [path]
     assert transcriber.calls == [path]
-    assert output == ["hello"]
     assert text_inserter.calls == ["hello"]
 
 
-def test_app_does_not_insert_empty_transcript(tmp_path) -> None:
-    recorder = FakeRecorder()
-    transcriber = FakeTranscriber("")
-    text_inserter = FakeTextInserter()
-    output: list[str] = []
-    path = tmp_path / "recording.wav"
-
-    App(
-        recorder=recorder,
-        transcriber=transcriber,
-        text_inserter=text_inserter,
-        output=output.append,
-    ).run(path)
-
-    assert recorder.calls == [path]
-    assert transcriber.calls == [path]
-    assert output == [""]
-    assert text_inserter.calls == []
-
-
-def test_hotkey_first_press_starts_recording(tmp_path) -> None:
+def test_app_logs_transcript(tmp_path, caplog) -> None:
     recorder = FakeRecorder()
     transcriber = FakeTranscriber()
     text_inserter = FakeTextInserter()
-    output: list[str] = []
     path = tmp_path / "recording.wav"
 
-    App(
-        recorder=recorder,
-        transcriber=transcriber,
-        text_inserter=text_inserter,
-        output=output.append,
-    ).handle_hotkey(path)
+    with caplog.at_level(logging.INFO):
+        App(
+            recorder=recorder,
+            transcriber=transcriber,
+            text_inserter=text_inserter,
+        ).run(path)
+
+    assert [(record.event, record.transcript) for record in caplog.records] == [
+        ("transcript_ready", "hello")
+    ]
+
+
+def test_app_does_not_insert_empty_transcript(tmp_path, caplog) -> None:
+    recorder = FakeRecorder()
+    transcriber = FakeTranscriber("")
+    text_inserter = FakeTextInserter()
+    path = tmp_path / "recording.wav"
+
+    with caplog.at_level(logging.INFO):
+        App(
+            recorder=recorder,
+            transcriber=transcriber,
+            text_inserter=text_inserter,
+        ).run(path)
+
+    assert recorder.calls == [path]
+    assert transcriber.calls == [path]
+    assert [(record.event, record.transcript) for record in caplog.records] == [
+        ("transcript_ready", "")
+    ]
+    assert text_inserter.calls == []
+
+
+def test_hotkey_first_press_starts_recording(tmp_path, caplog) -> None:
+    recorder = FakeRecorder()
+    transcriber = FakeTranscriber()
+    text_inserter = FakeTextInserter()
+    path = tmp_path / "recording.wav"
+
+    with caplog.at_level(logging.INFO):
+        App(
+            recorder=recorder,
+            transcriber=transcriber,
+            text_inserter=text_inserter,
+        ).handle_hotkey(path)
 
     assert recorder.started == 1
     assert recorder.stopped == []
     assert transcriber.calls == []
     assert text_inserter.calls == []
-    assert output == ["recording..."]
+    assert [record.event for record in caplog.records] == ["recording_started"]
 
 
-def test_hotkey_second_press_stops_transcribes_outputs_and_inserts(tmp_path) -> None:
+def test_hotkey_second_press_stops_transcribes_outputs_and_inserts(
+    tmp_path, caplog
+) -> None:
     recorder = FakeRecorder()
     transcriber = FakeTranscriber()
     text_inserter = FakeTextInserter()
-    output: list[str] = []
     path = tmp_path / "recording.wav"
     app = App(
         recorder=recorder,
         transcriber=transcriber,
         text_inserter=text_inserter,
-        output=output.append,
     )
 
-    app.handle_hotkey(path)
-    app.handle_hotkey(path)
-    app.wait_for_pending_work()
+    with caplog.at_level(logging.INFO):
+        app.handle_hotkey(path)
+        app.handle_hotkey(path)
+        app.wait_for_pending_work()
 
     assert recorder.started == 1
     assert recorder.stopped == [path]
     assert transcriber.calls == [path]
-    assert output == ["recording...", "transcribing...", "hello"]
+    assert [record.event for record in caplog.records] == [
+        "recording_started",
+        "transcribing_started",
+        "transcript_ready",
+    ]
+    assert caplog.records[-1].transcript == "hello"
     assert text_inserter.calls == ["hello"]
 
 
-def test_hotkey_does_not_insert_empty_transcript(tmp_path) -> None:
+def test_hotkey_does_not_insert_empty_transcript(tmp_path, caplog) -> None:
     recorder = FakeRecorder()
     transcriber = FakeTranscriber("")
     text_inserter = FakeTextInserter()
-    output: list[str] = []
     path = tmp_path / "recording.wav"
     app = App(
         recorder=recorder,
         transcriber=transcriber,
         text_inserter=text_inserter,
-        output=output.append,
     )
 
-    app.handle_hotkey(path)
-    app.handle_hotkey(path)
-    app.wait_for_pending_work()
+    with caplog.at_level(logging.INFO):
+        app.handle_hotkey(path)
+        app.handle_hotkey(path)
+        app.wait_for_pending_work()
 
-    assert output == ["recording...", "transcribing...", ""]
+    assert [record.event for record in caplog.records] == [
+        "recording_started",
+        "transcribing_started",
+        "transcript_ready",
+    ]
+    assert caplog.records[-1].transcript == ""
     assert text_inserter.calls == []
 
 
-def test_hotkey_ignores_presses_while_transcribing(tmp_path) -> None:
+def test_hotkey_ignores_presses_while_transcribing(tmp_path, caplog) -> None:
     can_finish = threading.Event()
     stop_started = threading.Event()
 
@@ -162,23 +188,28 @@ def test_hotkey_ignores_presses_while_transcribing(tmp_path) -> None:
     recorder = BlockingRecorder()
     transcriber = FakeTranscriber()
     text_inserter = FakeTextInserter()
-    output: list[str] = []
     path = tmp_path / "recording.wav"
     app = App(
         recorder=recorder,
         transcriber=transcriber,
         text_inserter=text_inserter,
-        output=output.append,
     )
 
-    app.handle_hotkey(path)
-    app.handle_hotkey(path)
-    assert stop_started.wait(timeout=5)
+    with caplog.at_level(logging.INFO):
+        app.handle_hotkey(path)
+        app.handle_hotkey(path)
+        assert stop_started.wait(timeout=5)
 
-    app.handle_hotkey(path)
-    can_finish.set()
-    app.wait_for_pending_work()
+        app.handle_hotkey(path)
+        can_finish.set()
+        app.wait_for_pending_work()
 
     assert recorder.started == 1
     assert recorder.stopped == [path]
-    assert output == ["recording...", "transcribing...", "busy", "hello"]
+    assert [record.event for record in caplog.records] == [
+        "recording_started",
+        "transcribing_started",
+        "hotkey_ignored",
+        "transcript_ready",
+    ]
+    assert caplog.records[2].reason == "busy"

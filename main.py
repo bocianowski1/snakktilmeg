@@ -3,6 +3,7 @@ from pathlib import Path
 from lib.app import App
 from lib.audio import SoundDeviceRecorder
 from lib.hotkeys import PynputHotkeyListener
+from lib.logging import configure_logging
 from lib.text_insertion import MacOSClipboardPaster
 from lib.transcription import WhisperTranscriber
 
@@ -23,6 +24,7 @@ def build_app() -> App:
 
 
 def main() -> None:
+    configure_logging()
     build_app().run_hotkey_loop(PynputHotkeyListener())
 
 
