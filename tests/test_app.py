@@ -4,6 +4,10 @@ from pathlib import Path
 import threading
 
 from lib.app import App
+from lib.errors import HotkeyError
+from lib.errors import RecordingError
+from lib.errors import TextInsertionError
+from lib.errors import TranscriptionError
 
 
 class FakeRecorder:
@@ -57,6 +61,11 @@ class InterruptingListener:
         raise KeyboardInterrupt
 
 
+class FailingListener:
+    def run(self, on_press: Callable[[], None]) -> None:
+        raise HotkeyError("listener unavailable", operation="hotkey_listener")
+
+
 def test_app_records_then_transcribes_outputs_and_inserts_result(tmp_path) -> None:
     recorder = FakeRecorder()
     transcriber = FakeTranscriber()
@@ -108,7 +117,7 @@ def test_app_does_not_insert_empty_transcript(tmp_path, caplog) -> None:
     assert recorder.calls == [path]
     assert transcriber.calls == [path]
     assert [(record.event, record.transcript) for record in caplog.records] == [
-        ("transcript_ready", "")
+        ("empty_transcript", "")
     ]
     assert text_inserter.calls == []
 
@@ -182,7 +191,7 @@ def test_hotkey_does_not_insert_empty_transcript(tmp_path, caplog) -> None:
     assert [record.event for record in caplog.records] == [
         "recording_started",
         "transcribing_started",
-        "transcript_ready",
+        "empty_transcript",
     ]
     assert caplog.records[-1].transcript == ""
     assert text_inserter.calls == []
@@ -320,5 +329,176 @@ def test_ctrl_c_while_transcribing_waits_for_pending_work(tmp_path, caplog) -> N
         "transcribing_started",
         "shutdown_requested",
         "transcript_ready",
+        "shutdown_complete",
+    ]
+
+
+def test_recording_start_failure_logs_and_allows_next_hotkey(tmp_path, caplog) -> None:
+    class StartFailingRecorder(FakeRecorder):
+        def __init__(self) -> None:
+            super().__init__()
+            self.should_fail = True
+
+        def start_recording(self) -> None:
+            if self.should_fail:
+                self.should_fail = False
+                raise RecordingError("microphone unavailable", operation="start_recording")
+            super().start_recording()
+
+    recorder = StartFailingRecorder()
+    app = App(
+        recorder=recorder,
+        transcriber=FakeTranscriber(),
+        text_inserter=FakeTextInserter(),
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.handle_hotkey(tmp_path / "recording.wav")
+        app.handle_hotkey(tmp_path / "recording.wav")
+
+    assert recorder.started == 1
+    assert [record.event for record in caplog.records] == [
+        "recording_start_failed",
+        "recording_started",
+    ]
+    assert caplog.records[0].operation == "start_recording"
+    assert caplog.records[0].error_type == "RecordingError"
+
+
+def test_worker_recording_failure_logs_and_allows_next_hotkey(tmp_path, caplog) -> None:
+    class StopFailingRecorder(FakeRecorder):
+        def stop_recording(self, path: Path) -> None:
+            self.stopped.append(path)
+            raise RecordingError("no audio captured", operation="stop_recording")
+
+    recorder = StopFailingRecorder()
+    app = App(
+        recorder=recorder,
+        transcriber=FakeTranscriber(),
+        text_inserter=FakeTextInserter(),
+    )
+    path = tmp_path / "recording.wav"
+
+    with caplog.at_level(logging.INFO):
+        app.handle_hotkey(path)
+        app.handle_hotkey(path)
+        app.wait_for_pending_work()
+        app.handle_hotkey(path)
+
+    assert recorder.started == 2
+    assert [record.event for record in caplog.records] == [
+        "recording_started",
+        "transcribing_started",
+        "recording_stop_failed",
+        "recording_started",
+    ]
+    assert caplog.records[2].error_type == "RecordingError"
+
+
+def test_worker_transcription_failure_logs_and_allows_next_hotkey(
+    tmp_path, caplog
+) -> None:
+    class FailingTranscriber(FakeTranscriber):
+        def transcribe(self, audio_path: Path) -> str:
+            self.calls.append(audio_path)
+            raise TranscriptionError("whisper failed", operation="transcribe")
+
+    recorder = FakeRecorder()
+    transcriber = FailingTranscriber()
+    app = App(
+        recorder=recorder,
+        transcriber=transcriber,
+        text_inserter=FakeTextInserter(),
+    )
+    path = tmp_path / "recording.wav"
+
+    with caplog.at_level(logging.INFO):
+        app.handle_hotkey(path)
+        app.handle_hotkey(path)
+        app.wait_for_pending_work()
+        app.handle_hotkey(path)
+
+    assert recorder.started == 2
+    assert transcriber.calls == [path]
+    assert [record.event for record in caplog.records] == [
+        "recording_started",
+        "transcribing_started",
+        "transcription_failed",
+        "recording_started",
+    ]
+    assert caplog.records[2].operation == "transcribe"
+
+
+def test_worker_text_insertion_failure_logs_after_transcript(tmp_path, caplog) -> None:
+    class FailingTextInserter(FakeTextInserter):
+        def insert(self, text: str) -> None:
+            self.calls.append(text)
+            raise TextInsertionError("paste failed", operation="paste_shortcut")
+
+    text_inserter = FailingTextInserter()
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=FakeTranscriber(),
+        text_inserter=text_inserter,
+    )
+    path = tmp_path / "recording.wav"
+
+    with caplog.at_level(logging.INFO):
+        app.handle_hotkey(path)
+        app.handle_hotkey(path)
+        app.wait_for_pending_work()
+
+    assert text_inserter.calls == ["hello"]
+    assert [record.event for record in caplog.records] == [
+        "recording_started",
+        "transcribing_started",
+        "transcript_ready",
+        "text_insert_failed",
+    ]
+    assert caplog.records[3].operation == "paste_shortcut"
+
+
+def test_hotkey_listener_failure_logs_and_shutdowns(tmp_path, caplog) -> None:
+    recorder = FakeRecorder()
+    app = App(
+        recorder=recorder,
+        transcriber=FakeTranscriber(),
+        text_inserter=FakeTextInserter(),
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.run_hotkey_loop(FailingListener(), tmp_path / "recording.wav")
+
+    assert [record.event for record in caplog.records] == [
+        "hotkey_listener_ready",
+        "hotkey_listener_failed",
+        "shutdown_requested",
+        "shutdown_complete",
+    ]
+    assert caplog.records[1].error_type == "HotkeyError"
+
+
+def test_shutdown_logs_discard_failure(tmp_path, caplog) -> None:
+    class DiscardFailingRecorder(FakeRecorder):
+        def discard_recording(self) -> None:
+            self.discarded += 1
+            raise RecordingError("failed to close stream", operation="discard_recording")
+
+    recorder = DiscardFailingRecorder()
+    app = App(
+        recorder=recorder,
+        transcriber=FakeTranscriber(),
+        text_inserter=FakeTextInserter(),
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.run_hotkey_loop(InterruptingListener(lambda on_press: on_press()), tmp_path)
+
+    assert recorder.discarded == 1
+    assert [record.event for record in caplog.records] == [
+        "hotkey_listener_ready",
+        "recording_started",
+        "shutdown_requested",
+        "recording_discard_failed",
         "shutdown_complete",
     ]

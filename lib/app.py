@@ -5,6 +5,11 @@ import tempfile
 import threading
 from typing import Protocol
 
+from lib.errors import HotkeyError
+from lib.errors import RecordingError
+from lib.errors import SnakktilmegError
+from lib.errors import TextInsertionError
+from lib.errors import TranscriptionError
 from lib.logging import get_logger
 
 
@@ -59,8 +64,18 @@ class App:
         self._worker: threading.Thread | None = None
 
     def run(self, out_path: Path = Path("recording.wav")) -> None:
-        self.recorder.record_wav_until_enter(out_path)
-        self._transcribe_output_and_insert(out_path)
+        try:
+            self.recorder.record_wav_until_enter(out_path)
+            self._transcribe_output_and_insert(out_path)
+        except Exception as error:
+            self._log_exception(
+                "app error",
+                "app_error",
+                error,
+                operation="run",
+                path=str(out_path),
+            )
+            raise
 
     def run_hotkey_loop(
         self,
@@ -75,12 +90,37 @@ class App:
             listener.run(lambda: self.handle_hotkey(out_path))
         except KeyboardInterrupt:
             self.shutdown()
+        except HotkeyError as error:
+            self._log_exception(
+                "hotkey listener failed",
+                "hotkey_listener_failed",
+                error,
+            )
+            self.shutdown()
+        except Exception as error:
+            self._log_exception(
+                "hotkey listener failed",
+                "hotkey_listener_failed",
+                error,
+                operation="hotkey_listener",
+            )
+            self.shutdown()
 
     def handle_hotkey(self, out_path: Path = DEFAULT_HOTKEY_RECORDING_PATH) -> None:
         with self._lock:
             state = self._state
             if state == "idle":
-                self.recorder.start_recording()
+                try:
+                    self.recorder.start_recording()
+                except Exception as error:
+                    self._log_exception(
+                        "recording start failed",
+                        "recording_start_failed",
+                        error,
+                        operation="start_recording",
+                    )
+                    self._state = "idle"
+                    return
                 self._state = "recording"
                 self.logger.info(
                     "recording started",
@@ -127,11 +167,20 @@ class App:
                 worker = self._worker
 
         if discard_recording:
-            self.recorder.discard_recording()
-            self.logger.info(
-                "recording discarded",
-                extra={"event": "recording_discarded"},
-            )
+            try:
+                self.recorder.discard_recording()
+            except Exception as error:
+                self._log_exception(
+                    "recording discard failed",
+                    "recording_discard_failed",
+                    error,
+                    operation="discard_recording",
+                )
+            else:
+                self.logger.info(
+                    "recording discarded",
+                    extra={"event": "recording_discarded"},
+                )
         if worker is not None:
             worker.join()
 
@@ -144,15 +193,70 @@ class App:
         try:
             self.recorder.stop_recording(out_path)
             self._transcribe_output_and_insert(out_path)
+        except RecordingError as error:
+            self._log_exception(
+                "recording stop failed",
+                "recording_stop_failed",
+                error,
+                operation="stop_recording",
+                path=str(out_path),
+            )
+        except TranscriptionError as error:
+            self._log_exception(
+                "transcription failed",
+                "transcription_failed",
+                error,
+                operation="transcribe",
+                path=str(out_path),
+            )
+        except TextInsertionError as error:
+            self._log_exception(
+                "text insertion failed",
+                "text_insert_failed",
+                error,
+            )
+        except Exception as error:
+            self._log_exception(
+                "worker failed",
+                "worker_failed",
+                error,
+                operation="finish_recording",
+                path=str(out_path),
+            )
         finally:
             with self._lock:
                 self._state = "idle"
 
     def _transcribe_output_and_insert(self, out_path: Path) -> None:
         transcript = self.transcriber.transcribe(out_path)
+        if not transcript:
+            self.logger.info(
+                "empty transcript",
+                extra={"event": "empty_transcript", "transcript": transcript},
+            )
+            return
+
         self.logger.info(
             "transcript ready",
             extra={"event": "transcript_ready", "transcript": transcript},
         )
-        if transcript:
-            self.text_inserter.insert(transcript)
+        self.text_inserter.insert(transcript)
+
+    def _log_exception(
+        self,
+        message: str,
+        event: str,
+        error: BaseException,
+        **context: object,
+    ) -> None:
+        extra = {
+            "event": event,
+            "error_type": type(error).__name__,
+            "error": str(error),
+            **context,
+        }
+        if isinstance(error, SnakktilmegError):
+            extra.update(error.log_context())
+            extra["event"] = event
+
+        self.logger.error(message, extra=extra, exc_info=error)
