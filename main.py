@@ -1,5 +1,8 @@
 import subprocess
 from pathlib import Path
+import queue
+
+import numpy as np
 import sounddevice as sd
 import wave
 from lib.utils import timed
@@ -30,16 +33,31 @@ class Service:
         )
         return self._extract_text_from_transcript(result.stdout)
 
-    def record_wav(self, path: Path, seconds: float) -> None:
-        print("recording...")
-        audio = sd.rec(
-            int(seconds * self.sample_rate),
+    def record_wav_until_enter(self, path: Path) -> None:
+        chunks: queue.Queue[np.ndarray] = queue.Queue()
+
+        def callback(indata, frames, time, status) -> None:
+            if status:
+                print(status)
+            chunks.put(indata.copy())
+
+        print("recording... press Enter to stop")
+        with sd.InputStream(
             samplerate=self.sample_rate,
             channels=self.channels,
             dtype="int16",
-        )
+            callback=callback,
+        ):
+            input()
 
-        sd.wait()
+        if chunks.empty():
+            raise RuntimeError("no audio captured")
+
+        captured_chunks: list[np.ndarray] = []
+        while not chunks.empty():
+            captured_chunks.append(chunks.get())
+
+        audio = np.concatenate(captured_chunks)
 
         with wave.open(str(path), "wb") as f:
             f.setnchannels(self.channels)
@@ -55,7 +73,7 @@ class Service:
 def main():
     svc = Service()
     out_path = Path("recording.wav")
-    # svc.record_wav(out_path, 5)
+    svc.record_wav_until_enter(out_path)
     result = svc.whisper(out_path)
     print(result)
 
