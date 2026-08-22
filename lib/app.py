@@ -1,9 +1,15 @@
 from collections.abc import Callable
 from pathlib import Path
+import tempfile
+import threading
 from typing import Protocol
 
 
 class Recorder(Protocol):
+    def start_recording(self) -> None: ...
+
+    def stop_recording(self, path: Path) -> None: ...
+
     def record_wav_until_enter(
         self,
         path: Path,
@@ -19,9 +25,16 @@ class TextInserter(Protocol):
     def insert(self, text: str) -> None: ...
 
 
+class HotkeyListener(Protocol):
+    def run(self, on_press: Callable[[], None]) -> None: ...
+
+
 class NullTextInserter:
     def insert(self, text: str) -> None:
         pass
+
+
+DEFAULT_HOTKEY_RECORDING_PATH = Path(tempfile.gettempdir()) / "snakktilmeg-recording.wav"
 
 
 class App:
@@ -36,9 +49,57 @@ class App:
         self.transcriber = transcriber
         self.text_inserter = text_inserter or NullTextInserter()
         self.output = output
+        self._state = "idle"
+        self._lock = threading.Lock()
+        self._worker: threading.Thread | None = None
 
     def run(self, out_path: Path = Path("recording.wav")) -> None:
         self.recorder.record_wav_until_enter(out_path)
+        self._transcribe_output_and_insert(out_path)
+
+    def run_hotkey_loop(
+        self,
+        listener: HotkeyListener,
+        out_path: Path = DEFAULT_HOTKEY_RECORDING_PATH,
+    ) -> None:
+        self.output("hotkey listener ready")
+        listener.run(lambda: self.handle_hotkey(out_path))
+
+    def handle_hotkey(self, out_path: Path = DEFAULT_HOTKEY_RECORDING_PATH) -> None:
+        with self._lock:
+            state = self._state
+            if state == "idle":
+                self.recorder.start_recording()
+                self._state = "recording"
+                self.output("recording...")
+                return
+            if state == "recording":
+                self._state = "transcribing"
+                self.output("transcribing...")
+                self._worker = threading.Thread(
+                    target=self._finish_recording,
+                    args=(out_path,),
+                    daemon=True,
+                )
+                self._worker.start()
+                return
+
+        self.output("busy")
+
+    def wait_for_pending_work(self) -> None:
+        worker = self._worker
+        if worker is not None:
+            worker.join()
+
+    def _finish_recording(self, out_path: Path) -> None:
+        try:
+            self.recorder.stop_recording(out_path)
+            self._transcribe_output_and_insert(out_path)
+        finally:
+            with self._lock:
+                self._state = "idle"
+
+    def _transcribe_output_and_insert(self, out_path: Path) -> None:
         transcript = self.transcriber.transcribe(out_path)
         self.output(transcript)
         if transcript:
