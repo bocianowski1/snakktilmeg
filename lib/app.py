@@ -6,6 +6,7 @@ import threading
 from typing import Protocol
 
 from lib.errors import HotkeyError
+from lib.errors import IndicatorError
 from lib.errors import RecordingError
 from lib.errors import SnakktilmegError
 from lib.errors import TextInsertionError
@@ -38,6 +39,22 @@ class TextInserter(Protocol):
 class HotkeyListener(Protocol):
     def run(self, on_press: Callable[[], None]) -> None: ...
 
+    def stop(self) -> None: ...
+
+
+class ActivityIndicator(Protocol):
+    def prepare(self) -> None: ...
+
+    def run(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+    def show_recording(self) -> None: ...
+
+    def show_transcribing(self) -> None: ...
+
+    def hide(self) -> None: ...
+
 
 class NullTextInserter:
     def insert(self, text: str) -> None:
@@ -53,15 +70,20 @@ class App:
         recorder: Recorder,
         transcriber: Transcriber,
         text_inserter: TextInserter | None = None,
+        indicator: ActivityIndicator | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self.recorder = recorder
         self.transcriber = transcriber
         self.text_inserter = text_inserter or NullTextInserter()
+        self.indicator = indicator
         self.logger = logger or get_logger(__name__)
         self._state = "idle"
         self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
+        self._listener: HotkeyListener | None = None
+        self._listener_worker: threading.Thread | None = None
+        self._shutdown_started = False
 
     def run(self, out_path: Path = Path("recording.wav")) -> None:
         try:
@@ -82,10 +104,33 @@ class App:
         listener: HotkeyListener,
         out_path: Path = DEFAULT_HOTKEY_RECORDING_PATH,
     ) -> None:
+        self._listener = listener
         self.logger.info(
             "hotkey listener ready",
             extra={"event": "hotkey_listener_ready"},
         )
+        if self.indicator is not None:
+            try:
+                self.indicator.prepare()
+            except Exception as error:
+                self._log_exception(
+                    "activity indicator unavailable",
+                    "indicator_initialization_failed",
+                    error,
+                    operation="prepare_indicator",
+                )
+                self.indicator = None
+            else:
+                self._run_hotkey_loop_with_indicator(listener, out_path)
+                return
+
+        self._run_blocking_hotkey_loop(listener, out_path)
+
+    def _run_blocking_hotkey_loop(
+        self,
+        listener: HotkeyListener,
+        out_path: Path,
+    ) -> None:
         try:
             listener.run(lambda: self.handle_hotkey(out_path))
         except KeyboardInterrupt:
@@ -105,6 +150,53 @@ class App:
                 operation="hotkey_listener",
             )
             self.shutdown()
+
+    def _run_hotkey_loop_with_indicator(
+        self,
+        listener: HotkeyListener,
+        out_path: Path,
+    ) -> None:
+        def listen() -> None:
+            try:
+                listener.run(lambda: self.handle_hotkey(out_path))
+            except HotkeyError as error:
+                self._log_exception(
+                    "hotkey listener failed",
+                    "hotkey_listener_failed",
+                    error,
+                )
+                self.shutdown()
+            except Exception as error:
+                self._log_exception(
+                    "hotkey listener failed",
+                    "hotkey_listener_failed",
+                    error,
+                    operation="hotkey_listener",
+                )
+                self.shutdown()
+
+        self._listener_worker = threading.Thread(
+            target=listen,
+            name="hotkey-listener",
+            daemon=True,
+        )
+        self._listener_worker.start()
+        try:
+            assert self.indicator is not None
+            self.indicator.run()
+        except KeyboardInterrupt:
+            self.shutdown()
+        except Exception as error:
+            self._log_exception(
+                "activity indicator event loop failed",
+                "indicator_event_loop_failed",
+                error,
+                operation="run_indicator",
+            )
+            self.shutdown()
+        finally:
+            self.shutdown()
+            self._listener_worker.join()
 
     def handle_hotkey(self, out_path: Path = DEFAULT_HOTKEY_RECORDING_PATH) -> None:
         with self._lock:
@@ -126,6 +218,7 @@ class App:
                     "recording started",
                     extra={"event": "recording_started"},
                 )
+                self._update_indicator("show_recording")
                 return
             if state == "recording":
                 self._state = "transcribing"
@@ -133,6 +226,7 @@ class App:
                     "transcribing started",
                     extra={"event": "transcribing_started"},
                 )
+                self._update_indicator("show_transcribing")
                 self._worker = threading.Thread(
                     target=self._finish_recording,
                     args=(out_path,),
@@ -152,6 +246,11 @@ class App:
             worker.join()
 
     def shutdown(self) -> None:
+        with self._lock:
+            if self._shutdown_started:
+                return
+            self._shutdown_started = True
+
         self.logger.info(
             "shutdown requested",
             extra={"event": "shutdown_requested"},
@@ -165,6 +264,19 @@ class App:
                 discard_recording = True
             elif self._state == "transcribing":
                 worker = self._worker
+
+        listener = self._listener
+        stop_listener = getattr(listener, "stop", None)
+        if callable(stop_listener):
+            try:
+                stop_listener()
+            except Exception as error:
+                self._log_exception(
+                    "hotkey listener stop failed",
+                    "hotkey_listener_stop_failed",
+                    error,
+                    operation="stop_hotkey_listener",
+                )
 
         if discard_recording:
             try:
@@ -183,6 +295,19 @@ class App:
                 )
         if worker is not None:
             worker.join()
+
+        self._update_indicator("hide")
+        indicator = self.indicator
+        if indicator is not None:
+            try:
+                indicator.stop()
+            except Exception as error:
+                self._log_exception(
+                    "activity indicator stop failed",
+                    "indicator_stop_failed",
+                    error,
+                    operation="stop_indicator",
+                )
 
         self.logger.info(
             "shutdown complete",
@@ -226,6 +351,29 @@ class App:
         finally:
             with self._lock:
                 self._state = "idle"
+            self._update_indicator("hide")
+
+    def _update_indicator(self, operation: str) -> None:
+        indicator = self.indicator
+        if indicator is None:
+            return
+        try:
+            getattr(indicator, operation)()
+        except Exception as error:
+            wrapped = (
+                error
+                if isinstance(error, IndicatorError)
+                else IndicatorError(
+                    "failed to update activity indicator",
+                    operation=operation,
+                )
+            )
+            self._log_exception(
+                "activity indicator update failed",
+                "indicator_update_failed",
+                wrapped,
+                operation=operation,
+            )
 
     def _transcribe_output_and_insert(self, out_path: Path) -> None:
         transcript = self.transcriber.transcribe(out_path)

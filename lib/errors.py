@@ -31,5 +31,9 @@ class HotkeyError(SnakktilmegError):
     pass
 
 
+class IndicatorError(SnakktilmegError):
+    pass
+
+
 class ConfigurationError(SnakktilmegError):
     pass

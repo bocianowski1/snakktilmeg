@@ -3,6 +3,7 @@ from lib.audio import SoundDeviceRecorder
 from lib.config import WhisperConfig
 from lib.config import load_whisper_config
 from lib.hotkeys import PynputHotkeyListener
+from lib.indicator import MacOSActivityIndicator
 from lib.logging import configure_logging
 from lib.text_insertion import MacOSClipboardPaster
 from lib.transcription import WhisperTranscriber
@@ -16,6 +17,7 @@ def build_app(config: WhisperConfig) -> App:
             model_path=config.whisper_model_path,
         ),
         text_inserter=MacOSClipboardPaster(),
+        indicator=MacOSActivityIndicator(),
     )
 
 

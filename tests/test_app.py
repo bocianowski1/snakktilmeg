@@ -60,10 +60,42 @@ class InterruptingListener:
         self.before_interrupt(on_press)
         raise KeyboardInterrupt
 
+    def stop(self) -> None:
+        pass
+
 
 class FailingListener:
     def run(self, on_press: Callable[[], None]) -> None:
         raise HotkeyError("listener unavailable", operation="hotkey_listener")
+
+    def stop(self) -> None:
+        pass
+
+
+class FakeIndicator:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.stopped = threading.Event()
+
+    def prepare(self) -> None:
+        self.calls.append("prepare")
+
+    def run(self) -> None:
+        self.calls.append("run")
+        self.stopped.wait(timeout=5)
+
+    def stop(self) -> None:
+        self.calls.append("stop")
+        self.stopped.set()
+
+    def show_recording(self) -> None:
+        self.calls.append("recording")
+
+    def show_transcribing(self) -> None:
+        self.calls.append("transcribing")
+
+    def hide(self) -> None:
+        self.calls.append("hide")
 
 
 def test_app_records_then_transcribes_outputs_and_inserts_result(tmp_path) -> None:
@@ -170,6 +202,44 @@ def test_hotkey_second_press_stops_transcribes_outputs_and_inserts(
     ]
     assert caplog.records[-1].transcript == "hello"
     assert text_inserter.calls == ["hello"]
+
+
+def test_hotkey_updates_indicator_through_recording_session(tmp_path) -> None:
+    indicator = FakeIndicator()
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=FakeTranscriber(),
+        text_inserter=FakeTextInserter(),
+        indicator=indicator,
+    )
+
+    app.handle_hotkey(tmp_path / "recording.wav")
+    app.handle_hotkey(tmp_path / "recording.wav")
+    app.wait_for_pending_work()
+
+    assert indicator.calls == ["recording", "transcribing", "hide"]
+
+
+def test_indicator_update_failure_does_not_interrupt_recording(tmp_path, caplog) -> None:
+    class FailingIndicator(FakeIndicator):
+        def show_recording(self) -> None:
+            raise RuntimeError("display unavailable")
+
+    recorder = FakeRecorder()
+    app = App(
+        recorder=recorder,
+        transcriber=FakeTranscriber(),
+        indicator=FailingIndicator(),
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.handle_hotkey(tmp_path / "recording.wav")
+
+    assert recorder.started == 1
+    assert [record.event for record in caplog.records] == [
+        "recording_started",
+        "indicator_update_failed",
+    ]
 
 
 def test_hotkey_does_not_insert_empty_transcript(tmp_path, caplog) -> None:
@@ -476,6 +546,48 @@ def test_hotkey_listener_failure_logs_and_shutdowns(tmp_path, caplog) -> None:
         "shutdown_complete",
     ]
     assert caplog.records[1].error_type == "HotkeyError"
+
+
+def test_indicator_initialization_failure_falls_back_to_blocking_loop(
+    tmp_path, caplog
+) -> None:
+    class FailingIndicator(FakeIndicator):
+        def prepare(self) -> None:
+            raise RuntimeError("AppKit unavailable")
+
+    with caplog.at_level(logging.INFO):
+        App(
+            recorder=FakeRecorder(),
+            transcriber=FakeTranscriber(),
+            indicator=FailingIndicator(),
+        ).run_hotkey_loop(InterruptingListener(lambda on_press: None), tmp_path)
+
+    assert [record.event for record in caplog.records] == [
+        "hotkey_listener_ready",
+        "indicator_initialization_failed",
+        "shutdown_requested",
+        "shutdown_complete",
+    ]
+
+
+def test_listener_failure_stops_indicator_event_loop(tmp_path, caplog) -> None:
+    indicator = FakeIndicator()
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=FakeTranscriber(),
+        indicator=indicator,
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.run_hotkey_loop(FailingListener(), tmp_path)
+
+    assert indicator.calls == ["prepare", "run", "hide", "stop"]
+    assert [record.event for record in caplog.records] == [
+        "hotkey_listener_ready",
+        "hotkey_listener_failed",
+        "shutdown_requested",
+        "shutdown_complete",
+    ]
 
 
 def test_shutdown_logs_discard_failure(tmp_path, caplog) -> None:
