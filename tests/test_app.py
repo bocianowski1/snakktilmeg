@@ -98,6 +98,24 @@ class FakeIndicator:
         self.calls.append("hide")
 
 
+class ReturningIndicator(FakeIndicator):
+    def run(self) -> None:
+        self.calls.append("run")
+
+
+class BlockingListener:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.stopped = threading.Event()
+
+    def run(self, on_press: Callable[[], None]) -> None:
+        self.started.set()
+        self.stopped.wait(timeout=5)
+
+    def stop(self) -> None:
+        self.stopped.set()
+
+
 def test_app_records_then_transcribes_outputs_and_inserts_result(tmp_path) -> None:
     recorder = FakeRecorder()
     transcriber = FakeTranscriber()
@@ -585,6 +603,30 @@ def test_listener_failure_stops_indicator_event_loop(tmp_path, caplog) -> None:
     assert [record.event for record in caplog.records] == [
         "hotkey_listener_ready",
         "hotkey_listener_failed",
+        "shutdown_requested",
+        "shutdown_complete",
+    ]
+
+
+def test_indicator_event_loop_exit_stops_listener_and_shuts_down(
+    tmp_path, caplog
+) -> None:
+    indicator = ReturningIndicator()
+    listener = BlockingListener()
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=FakeTranscriber(),
+        indicator=indicator,
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.run_hotkey_loop(listener, tmp_path)
+
+    assert listener.started.is_set()
+    assert listener.stopped.is_set()
+    assert indicator.calls == ["prepare", "run", "hide", "stop"]
+    assert [record.event for record in caplog.records] == [
+        "hotkey_listener_ready",
         "shutdown_requested",
         "shutdown_complete",
     ]

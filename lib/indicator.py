@@ -85,7 +85,11 @@ class MacOSActivityIndicator:
             )
         from PyObjCTools import AppHelper
 
-        AppHelper.runEventLoop(installInterrupt=True)
+        # prepare() creates NSApplication before the event loop starts. PyObjC's
+        # runEventLoop only installs its Mach SIGINT bridge when it creates the
+        # application itself, so install it explicitly for Ctrl-C handling.
+        AppHelper.installMachInterrupt()
+        AppHelper.runEventLoop(installInterrupt=False)
 
     def stop(self) -> None:
         if not self._prepared:
