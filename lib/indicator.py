@@ -1,6 +1,7 @@
 # PyObjC exposes framework symbols dynamically, so static type checkers cannot
 # discover AppKit and Quartz attributes even when they are present at runtime.
-# pyright: reportAttributeAccessIssue=false, reportOptionalMemberAccess=false
+# PyObjC is only installed on macOS, so its imports are unresolved elsewhere.
+# pyright: reportAttributeAccessIssue=false, reportOptionalMemberAccess=false, reportMissingImports=false
 
 from collections.abc import Callable, Sequence
 import logging

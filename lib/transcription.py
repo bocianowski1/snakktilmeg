@@ -35,6 +35,10 @@ def run_command(
         args,
         capture_output=capture_output,
         text=text,
+        # whisper.cpp prints UTF-8; Windows would otherwise decode with the
+        # locale code page and mangle non-ASCII transcripts.
+        encoding="utf-8" if text else None,
+        errors="replace" if text else None,
         check=check,
     )
 

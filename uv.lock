@@ -378,8 +378,8 @@ source = { virtual = "." }
 dependencies = [
     { name = "numpy" },
     { name = "pynput" },
-    { name = "pyobjc-framework-cocoa" },
-    { name = "pyobjc-framework-quartz" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
     { name = "python-dotenv" },
     { name = "sounddevice" },
 ]
@@ -395,8 +395,8 @@ dev = [
 requires-dist = [
     { name = "numpy", specifier = ">=2.5.2" },
     { name = "pynput", specifier = ">=1.8.1" },
-    { name = "pyobjc-framework-cocoa", specifier = ">=12.2.2" },
-    { name = "pyobjc-framework-quartz", specifier = ">=12.2.2" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = ">=12.2.2" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'", specifier = ">=12.2.2" },
     { name = "python-dotenv", specifier = ">=1.2.3" },
     { name = "sounddevice", specifier = ">=0.5.6" },
 ]

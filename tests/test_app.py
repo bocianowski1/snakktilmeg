@@ -571,7 +571,7 @@ def test_indicator_initialization_failure_falls_back_to_blocking_loop(
 ) -> None:
     class FailingIndicator(FakeIndicator):
         def prepare(self) -> None:
-            raise RuntimeError("AppKit unavailable")
+            raise RuntimeError("indicator backend unavailable")
 
     with caplog.at_level(logging.INFO):
         App(

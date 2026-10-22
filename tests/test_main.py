@@ -1,7 +1,14 @@
 from pathlib import Path
 
+import pytest
+
 import main
 from lib.config import WhisperConfig
+from lib.errors import ConfigurationError
+from lib.indicator import MacOSActivityIndicator
+from lib.text_insertion import MacOSClipboardPaster
+from lib.text_insertion import WindowsClipboardPaster
+from lib.windows_indicator import WindowsActivityIndicator
 
 
 def test_main_passes_configured_hotkey_to_listener(monkeypatch) -> None:
@@ -35,3 +42,25 @@ def test_main_passes_configured_hotkey_to_listener(monkeypatch) -> None:
     assert captured["config"] is config
     assert isinstance(captured["listener"], FakeListener)
     assert captured["listener"].hotkey == "<cmd>+<shift>+space"
+
+
+def test_build_platform_adapters_uses_macos_adapters_on_darwin() -> None:
+    text_inserter, indicator = main.build_platform_adapters("darwin")
+
+    assert isinstance(text_inserter, MacOSClipboardPaster)
+    assert isinstance(indicator, MacOSActivityIndicator)
+
+
+def test_build_platform_adapters_uses_windows_adapters_on_win32() -> None:
+    text_inserter, indicator = main.build_platform_adapters("win32")
+
+    assert isinstance(text_inserter, WindowsClipboardPaster)
+    assert isinstance(indicator, WindowsActivityIndicator)
+
+
+def test_build_platform_adapters_rejects_unsupported_platform() -> None:
+    with pytest.raises(ConfigurationError) as error:
+        main.build_platform_adapters("linux")
+
+    assert str(error.value) == "unsupported platform"
+    assert error.value.context["platform"] == "linux"

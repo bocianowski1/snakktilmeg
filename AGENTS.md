@@ -1,6 +1,6 @@
 # Agent Guide
 
-This project is a small macOS dictation helper. It records audio on a global
+This project is a small macOS and Windows dictation helper. It records audio on a global
 hotkey, transcribes the WAV through a local `whisper.cpp` CLI, and pastes the
 result into the active app.
 
@@ -10,14 +10,17 @@ easy to extend.
 ## Architecture
 
 - `main.py` is the composition root. It should wire config, logging, concrete
-  adapters, and the application object. Avoid putting workflow logic here.
+  adapters, and the application object, choosing platform adapters by
+  `sys.platform`. Avoid putting workflow logic here.
 - `lib/app.py` owns orchestration: recording state, hotkey behavior,
   transcription flow, text insertion, shutdown, and user-facing logging.
 - Adapter modules wrap external systems:
   - `lib/audio.py`: microphone capture and WAV writing through `sounddevice`.
   - `lib/transcription.py`: `whisper.cpp` subprocess invocation and transcript
     parsing.
-  - `lib/text_insertion.py`: macOS clipboard and paste automation.
+  - `lib/text_insertion.py`: macOS and Windows clipboard and paste automation.
+  - `lib/indicator.py`: macOS AppKit status overlay.
+  - `lib/windows_indicator.py`: Windows `tkinter` status overlay.
   - `lib/hotkeys.py`: global hotkey listener through `pynput`.
   - `lib/config.py`: environment and `.env` configuration.
   - `lib/logging.py`: JSON logging setup.
@@ -42,7 +45,10 @@ easy to extend.
   interpretation.
 - Keep imports of optional/platform-specific libraries inside the adapter
   methods that need them when possible. This keeps tests portable and avoids
-  import-time failures on machines missing macOS-specific dependencies.
+  import-time failures on machines missing macOS- or Windows-specific
+  dependencies.
+- Keep macOS and Windows behind the same protocols. A new platform capability
+  needs an adapter for each supported platform, wired in `main.py`.
 - Do not introduce broad frameworks, background job systems, or global mutable
   state unless the existing protocol-and-adapter structure is no longer enough.
 
@@ -94,5 +100,6 @@ HOTKEY=<ctrl>+<alt>+<space>
 The app derives the CLI path as:
 
 ```text
-${WHISPER_REPO_PATH}/build/bin/whisper-cli
+macOS:   ${WHISPER_REPO_PATH}/build/bin/whisper-cli
+Windows: ${WHISPER_REPO_PATH}/build/bin/Release/whisper-cli.exe
 ```

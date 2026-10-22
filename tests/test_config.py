@@ -17,6 +17,7 @@ def test_load_whisper_config_reads_env_and_derives_cli_path(tmp_path) -> None:
             "WHISPER_MODEL_PATH": str(model_path),
             "HOTKEY": "<cmd>+<space>",
         },
+        platform="darwin",
     )
 
     assert config.whisper_repo_path == repo_path
@@ -38,7 +39,7 @@ def test_load_whisper_config_reads_dotenv_file(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("WHISPER_MODEL_PATH", raising=False)
     monkeypatch.delenv("HOTKEY", raising=False)
 
-    config = load_whisper_config(env_file=env_file)
+    config = load_whisper_config(env_file=env_file, platform="darwin")
 
     assert config.whisper_repo_path == repo_path
     assert config.whisper_cli_path == repo_path / "build" / "bin" / "whisper-cli"
@@ -131,3 +132,21 @@ def test_load_whisper_config_raises_for_empty_hotkey(tmp_path) -> None:
 
     assert str(error.value) == "missing required environment variable"
     assert error.value.context["variable"] == "HOTKEY"
+
+
+def test_load_whisper_config_derives_windows_cli_path(tmp_path) -> None:
+    repo_path = tmp_path / "whisper.cpp"
+
+    config = load_whisper_config(
+        env_file=tmp_path / "missing.env",
+        environ={
+            "WHISPER_REPO_PATH": str(repo_path),
+            "WHISPER_MODEL_PATH": str(tmp_path / "model.bin"),
+            "HOTKEY": "<ctrl>+<alt>+<space>",
+        },
+        platform="win32",
+    )
+
+    assert config.whisper_cli_path == (
+        repo_path / "build" / "bin" / "Release" / "whisper-cli.exe"
+    )

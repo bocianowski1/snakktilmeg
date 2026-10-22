@@ -2,6 +2,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import sys
 
 from dotenv import load_dotenv
 
@@ -25,6 +26,7 @@ def load_whisper_config(
     *,
     env_file: Path | str = ".env",
     environ: Mapping[str, str] | None = None,
+    platform: str = sys.platform,
 ) -> WhisperConfig:
     load_dotenv(dotenv_path=env_file)
     values = environ if environ is not None else os.environ
@@ -35,10 +37,17 @@ def load_whisper_config(
 
     return WhisperConfig(
         whisper_repo_path=repo_path,
-        whisper_cli_path=repo_path / "build" / "bin" / "whisper-cli",
+        whisper_cli_path=whisper_cli_path(repo_path, platform),
         whisper_model_path=model_path,
         hotkey=hotkey,
     )
+
+
+def whisper_cli_path(repo_path: Path, platform: str = sys.platform) -> Path:
+    if platform == "win32":
+        # CMake's Visual Studio generator puts binaries in a per-config folder.
+        return repo_path / "build" / "bin" / "Release" / "whisper-cli.exe"
+    return repo_path / "build" / "bin" / "whisper-cli"
 
 
 def _read_path(values: Mapping[str, str], name: str) -> Path:
