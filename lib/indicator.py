@@ -18,9 +18,15 @@ class Rect(NamedTuple):
     height: float
 
 
-PANEL_WIDTH = 190.0
+PANEL_WIDTH = 220.0
 PANEL_HEIGHT = 52.0
 PANEL_BOTTOM_MARGIN = 24.0
+
+
+def status_text(status: str, language: str | None) -> str:
+    if language is None:
+        return status
+    return f"{status} · {language.upper()}"
 
 
 def intersection_area(first: Rect, second: Rect) -> float:
@@ -99,11 +105,11 @@ class MacOSActivityIndicator:
 
         AppHelper.callAfter(AppHelper.stopEventLoop)
 
-    def show_recording(self) -> None:
-        self._dispatch(self._show_recording)
+    def show_recording(self, language: str | None = None) -> None:
+        self._dispatch(self._show_recording, language)
 
-    def show_transcribing(self) -> None:
-        self._dispatch(self._show_transcribing)
+    def show_transcribing(self, language: str | None = None) -> None:
+        self._dispatch(self._show_transcribing, language)
 
     def hide(self) -> None:
         self._dispatch(self._hide)
@@ -182,7 +188,7 @@ class MacOSActivityIndicator:
         spinner.setHidden_(True)
         background.addSubview_(spinner)
 
-        label = NSTextField.alloc().initWithFrame_(NSMakeRect(50, 15, 124, 22))
+        label = NSTextField.alloc().initWithFrame_(NSMakeRect(50, 15, PANEL_WIDTH - 66, 22))
         label.setStringValue_("Listening…")
         label.setTextColor_(NSColor.whiteColor())
         label.setFont_(NSFont.systemFontOfSize_weight_(14.0, 0.5))
@@ -198,7 +204,7 @@ class MacOSActivityIndicator:
         self._spinner = spinner
         self._prepared = True
 
-    def _dispatch(self, callback: Callable[[], None]) -> None:
+    def _dispatch(self, callback: Callable[..., None], *args: object) -> None:
         if not self._prepared:
             raise IndicatorError(
                 "activity indicator is not initialized",
@@ -208,7 +214,7 @@ class MacOSActivityIndicator:
 
         def safely_update() -> None:
             try:
-                callback()
+                callback(*args)
             except Exception as error:
                 wrapped = IndicatorError(
                     "failed to update activity indicator",
@@ -225,23 +231,23 @@ class MacOSActivityIndicator:
 
         AppHelper.callAfter(safely_update)
 
-    def _show_recording(self) -> None:
+    def _show_recording(self, language: str | None) -> None:
         self._session_screen = self._focused_screen()
         self._position_on_screen(self._session_screen)
         self._spinner.setHidden_(True)
         self._spinner.stopAnimation_(None)
         self._icon.setHidden_(False)
-        self._label.setStringValue_("Listening…")
+        self._label.setStringValue_(status_text("Listening…", language))
         self._panel.orderFrontRegardless()
 
-    def _show_transcribing(self) -> None:
+    def _show_transcribing(self, language: str | None) -> None:
         if self._session_screen is None:
             self._session_screen = self._focused_screen()
             self._position_on_screen(self._session_screen)
         self._icon.setHidden_(True)
         self._spinner.setHidden_(False)
         self._spinner.startAnimation_(None)
-        self._label.setStringValue_("Transcribing…")
+        self._label.setStringValue_(status_text("Transcribing…", language))
         self._panel.orderFrontRegardless()
 
     def _hide(self) -> None:

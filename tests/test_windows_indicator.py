@@ -29,7 +29,7 @@ def prepared_indicator() -> tuple[WindowsActivityIndicator, FakeRoot]:
 
 
 def test_overlay_is_centered_above_work_area_bottom_edge() -> None:
-    assert overlay_frame(Rect(100, 80, 1200, 800)) == Rect(605, 804, 190, 52)
+    assert overlay_frame(Rect(100, 80, 1200, 800)) == Rect(590, 804, 220, 52)
 
 
 def test_updates_before_prepare_raise_indicator_error() -> None:
@@ -52,17 +52,19 @@ def test_stop_before_prepare_is_a_no_op() -> None:
 
 def test_updates_are_queued_until_event_loop_drains_them(monkeypatch) -> None:
     indicator, _ = prepared_indicator()
-    calls: list[str] = []
-    monkeypatch.setattr(indicator, "_show_recording", lambda: calls.append("rec"))
+    calls: list[object] = []
+    monkeypatch.setattr(
+        indicator, "_show_recording", lambda language: calls.append(("rec", language))
+    )
     monkeypatch.setattr(indicator, "_hide", lambda: calls.append("hide"))
 
-    indicator.show_recording()
+    indicator.show_recording("no")
     indicator.hide()
     assert calls == []
 
     indicator._drain()
 
-    assert calls == ["rec", "hide"]
+    assert calls == [("rec", "no"), "hide"]
 
 
 def test_failed_update_is_logged_and_later_updates_still_run(caplog) -> None:

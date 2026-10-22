@@ -83,6 +83,7 @@ class FailingListener:
 class FakeIndicator:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.languages: list[str | None] = []
         self.stopped = threading.Event()
 
     def prepare(self) -> None:
@@ -96,11 +97,13 @@ class FakeIndicator:
         self.calls.append("stop")
         self.stopped.set()
 
-    def show_recording(self) -> None:
+    def show_recording(self, language: str | None) -> None:
         self.calls.append("recording")
+        self.languages.append(language)
 
-    def show_transcribing(self) -> None:
+    def show_transcribing(self, language: str | None) -> None:
         self.calls.append("transcribing")
+        self.languages.append(language)
 
     def hide(self) -> None:
         self.calls.append("hide")
@@ -252,7 +255,7 @@ def test_hotkey_updates_indicator_through_recording_session(tmp_path) -> None:
 
 def test_indicator_update_failure_does_not_interrupt_recording(tmp_path, caplog) -> None:
     class FailingIndicator(FakeIndicator):
-        def show_recording(self) -> None:
+        def show_recording(self, language: str | None) -> None:
             raise RuntimeError("display unavailable")
 
     recorder = FakeRecorder()
@@ -764,3 +767,59 @@ def test_hotkey_loop_passes_language_selection_to_listener(tmp_path) -> None:
     app.run_hotkey_loop(SelectingListener(), tmp_path)
 
     assert app.language == "no"
+
+
+def test_indicator_shows_active_language_for_recording_session(tmp_path) -> None:
+    indicator = FakeIndicator()
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=FakeTranscriber(),
+        indicator=indicator,
+        language_transcribers={"en": FakeTranscriber()},
+        default_language="no",
+    )
+
+    app.handle_hotkey(tmp_path)
+    app.handle_hotkey(tmp_path)
+    app.wait_for_pending_work()
+    app.select_language("en")
+    app.handle_hotkey(tmp_path)
+    app.handle_hotkey(tmp_path)
+    app.wait_for_pending_work()
+
+    assert indicator.languages == ["no", "no", "en", "en"]
+
+
+def test_language_selection_logs_previous_language(caplog) -> None:
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=FakeTranscriber(),
+        language_transcribers={"en": FakeTranscriber(), "no": FakeTranscriber()},
+        default_language="no",
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.select_language("en")
+        app.select_language("no")
+
+    assert [
+        (record.event, record.language, record.previous_language)
+        for record in caplog.records
+    ] == [
+        ("language_selected", "en", "no"),
+        ("language_selected", "no", "en"),
+    ]
+
+
+def test_recording_started_log_includes_language(tmp_path, caplog) -> None:
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=FakeTranscriber(),
+        default_language="no",
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.handle_hotkey(tmp_path)
+
+    assert caplog.records[0].event == "recording_started"
+    assert caplog.records[0].language == "no"

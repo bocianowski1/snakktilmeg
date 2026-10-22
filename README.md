@@ -46,7 +46,7 @@ WHISPER_MODEL_PATH_NO=~/code/div/whisper.cpp/models/ggml-nb-whisper-small.bin
 HOTKEY_NO=<ctrl>+<alt>+n
 ```
 
-The app starts with `WHISPER_MODEL_PATH`/`WHISPER_LANGUAGE` and switches when you press a language hotkey. The switch applies from the next recording; a transcription already in progress keeps its language. Each switch is logged with event `language_selected`. Hotkeys are not swallowed, so the focused app also sees them: avoid plain letters and combinations your apps use. On Windows, `AltGr` is the same as `Ctrl` + `Alt`, so `<ctrl>+<alt>+e` fires for both `Ctrl` + `AltGr` + `E` and `AltGr` + `E`; write it as `<ctrl>+<alt>`, because `<alt_gr>` never matches. On a Norwegian layout `AltGr` + `E` also types `€` into the focused app. Letters in hotkeys match by key position on Windows, so these combinations work on Nordic layouts.
+The app starts with `WHISPER_MODEL_PATH`/`WHISPER_LANGUAGE` and switches when you press a language hotkey. The switch applies from the next recording; a transcription already in progress keeps its language. Each switch is logged with event `language_selected`, including `language` and `previous_language`, and `recording_started` logs the language used for that recording. Hotkeys are not swallowed, so the focused app also sees them: avoid plain letters and combinations your apps use. On Windows, `AltGr` is the same as `Ctrl` + `Alt`, so `<ctrl>+<alt>+e` fires for both `Ctrl` + `AltGr` + `E` and `AltGr` + `E`; write it as `<ctrl>+<alt>`, because `<alt_gr>` never matches. On a Norwegian layout `AltGr` + `E` also types `€` into the focused app. Letters in hotkeys match by key position on Windows, so these combinations work on Nordic layouts.
 
 If `whisper.cpp` is not already built, build it and download the configured model before running this app. The app derives the CLI path from `WHISPER_REPO_PATH`:
 
@@ -63,7 +63,7 @@ uv run python main.py
 
 Default hotkey: `Ctrl` + `Alt` + `Space`. Configure it with `HOTKEY` in `.env` using `pynput.keyboard.HotKey.parse` syntax, for example `<ctrl>+<alt>+<space>`.
 
-Use the hotkey once to start recording and again to stop. A click-through status pill appears near the bottom center of the focused application's display: it shows `Listening…` while the microphone is recording and `Transcribing…` while whisper is processing the audio. If the focused display cannot be determined, the pill appears on the primary display. While transcription is running, additional hotkey presses are ignored. Logs are emitted as JSON on stderr/stdout depending on the logging handler stream.
+Use the hotkey once to start recording and again to stop. A click-through status pill appears near the bottom center of the focused application's display: it shows `Listening…` while the microphone is recording and `Transcribing…` while whisper is processing the audio. When a language is set (`WHISPER_LANGUAGE` or a language hotkey), the pill appends it, for example `Listening… · NO`. If the focused display cannot be determined, the pill appears on the primary display. While transcription is running, additional hotkey presses are ignored. Logs are emitted as JSON on stderr/stdout depending on the logging handler stream.
 
 On macOS the overlay uses native AppKit APIs; on Windows it is a click-through `tkinter` window on the focused window's monitor. On both platforms it does not take keyboard focus, so the paste lands in the app you were using. If it cannot be initialized, the failure is logged and dictation continues without the visual indicator.
 

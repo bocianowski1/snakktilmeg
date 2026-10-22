@@ -6,6 +6,7 @@ from lib.indicator import Rect
 from lib.indicator import intersection_area
 from lib.indicator import overlay_frame
 from lib.indicator import select_display_id
+from lib.indicator import status_text
 
 
 def test_intersection_area_returns_overlap() -> None:
@@ -28,7 +29,7 @@ def test_select_display_returns_none_when_window_is_offscreen() -> None:
 
 
 def test_overlay_is_centered_above_visible_bottom_edge() -> None:
-    assert overlay_frame(Rect(100, 80, 1200, 800)) == Rect(605, 104, 190, 52)
+    assert overlay_frame(Rect(100, 80, 1200, 800)) == Rect(590, 104, 220, 52)
 
 
 def test_run_installs_interrupt_handler_before_starting_event_loop(monkeypatch) -> None:
@@ -56,3 +57,11 @@ def test_run_installs_interrupt_handler_before_starting_event_loop(monkeypatch) 
     indicator.run()
 
     assert calls == ["install_interrupt", ("run_event_loop", False)]
+
+
+def test_status_text_appends_uppercase_language() -> None:
+    assert status_text("Listening…", "no") == "Listening… · NO"
+
+
+def test_status_text_without_language_is_unchanged() -> None:
+    assert status_text("Listening…", None) == "Listening…"

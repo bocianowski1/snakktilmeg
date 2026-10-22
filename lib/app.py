@@ -53,9 +53,9 @@ class ActivityIndicator(Protocol):
 
     def stop(self) -> None: ...
 
-    def show_recording(self) -> None: ...
+    def show_recording(self, language: str | None) -> None: ...
 
-    def show_transcribing(self) -> None: ...
+    def show_transcribing(self, language: str | None) -> None: ...
 
     def hide(self) -> None: ...
 
@@ -77,11 +77,13 @@ class App:
         indicator: ActivityIndicator | None = None,
         logger: logging.Logger | None = None,
         language_transcribers: Mapping[str, Transcriber] | None = None,
+        default_language: str | None = None,
     ) -> None:
         self.recorder = recorder
         self.transcriber = transcriber
         self.language_transcribers = dict(language_transcribers or {})
         self.language: str | None = None
+        self.default_language = default_language
         self.text_inserter = text_inserter or NullTextInserter()
         self.indicator = indicator
         self.logger = logger or get_logger(__name__)
@@ -221,11 +223,12 @@ class App:
                     self._state = "idle"
                     return
                 self._state = "recording"
+                language = self.active_language
                 self.logger.info(
                     "recording started",
-                    extra={"event": "recording_started"},
+                    extra={"event": "recording_started", "language": language},
                 )
-                self._update_indicator("show_recording")
+                self._update_indicator("show_recording", language)
                 return
             if state == "recording":
                 self._state = "transcribing"
@@ -233,7 +236,7 @@ class App:
                     "transcribing started",
                     extra={"event": "transcribing_started"},
                 )
-                self._update_indicator("show_transcribing")
+                self._update_indicator("show_transcribing", self.active_language)
                 # Bind the transcriber now so a language switch during
                 # transcription only affects the next recording.
                 self._worker = threading.Thread(
@@ -251,6 +254,7 @@ class App:
 
     def select_language(self, language: str) -> None:
         with self._lock:
+            previous_language = self.active_language
             known = language in self.language_transcribers
             if known:
                 self.language = language
@@ -262,7 +266,11 @@ class App:
             return
         self.logger.info(
             "language selected",
-            extra={"event": "language_selected", "language": language},
+            extra={
+                "event": "language_selected",
+                "language": language,
+                "previous_language": previous_language,
+            },
         )
 
     def wait_for_pending_work(self) -> None:
@@ -378,12 +386,12 @@ class App:
                 self._state = "idle"
             self._update_indicator("hide")
 
-    def _update_indicator(self, operation: str) -> None:
+    def _update_indicator(self, operation: str, *args: object) -> None:
         indicator = self.indicator
         if indicator is None:
             return
         try:
-            getattr(indicator, operation)()
+            getattr(indicator, operation)(*args)
         except Exception as error:
             wrapped = (
                 error
@@ -399,6 +407,10 @@ class App:
                 wrapped,
                 operation=operation,
             )
+
+    @property
+    def active_language(self) -> str | None:
+        return self.language or self.default_language
 
     def _active_transcriber(self) -> Transcriber:
         if self.language is None:

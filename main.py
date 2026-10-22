@@ -47,6 +47,7 @@ def build_app(config: WhisperConfig, platform: str = sys.platform) -> App:
             )
             for profile in config.language_profiles
         },
+        default_language=config.whisper_language,
     )
 
 

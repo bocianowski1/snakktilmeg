@@ -12,6 +12,7 @@ from lib.indicator import PANEL_BOTTOM_MARGIN
 from lib.indicator import PANEL_HEIGHT
 from lib.indicator import PANEL_WIDTH
 from lib.indicator import Rect
+from lib.indicator import status_text
 from lib.logging import get_logger
 
 
@@ -105,11 +106,11 @@ class WindowsActivityIndicator:
             return
         self._commands.put(self._quit)
 
-    def show_recording(self) -> None:
-        self._dispatch(self._show_recording)
+    def show_recording(self, language: str | None = None) -> None:
+        self._dispatch(self._show_recording, language)
 
-    def show_transcribing(self) -> None:
-        self._dispatch(self._show_transcribing)
+    def show_transcribing(self, language: str | None = None) -> None:
+        self._dispatch(self._show_transcribing, language)
 
     def hide(self) -> None:
         self._dispatch(self._hide)
@@ -222,25 +223,34 @@ class WindowsActivityIndicator:
         self._spinning = False
         self._root.quit()
 
-    def _dispatch(self, callback: Callable[[], None]) -> None:
+    def _dispatch(self, callback: Callable[..., None], *args: object) -> None:
         if not self._prepared:
             raise IndicatorError(
                 "activity indicator is not initialized",
                 operation=callback.__name__,
             )
-        self._commands.put(callback)
 
-    def _show_recording(self) -> None:
+        def command() -> None:
+            callback(*args)
+
+        command.__name__ = callback.__name__
+        self._commands.put(command)
+
+    def _show_recording(self, language: str | None) -> None:
         self._spinning = False
         self._canvas.itemconfigure(self._spinner, state="hidden")
         self._canvas.itemconfigure(self._dot, state="normal")
-        self._canvas.itemconfigure(self._label, text="Listening…")
+        self._canvas.itemconfigure(
+            self._label, text=status_text("Listening…", language)
+        )
         self._show_on_focused_display()
 
-    def _show_transcribing(self) -> None:
+    def _show_transcribing(self, language: str | None) -> None:
         self._canvas.itemconfigure(self._dot, state="hidden")
         self._canvas.itemconfigure(self._spinner, state="normal")
-        self._canvas.itemconfigure(self._label, text="Transcribing…")
+        self._canvas.itemconfigure(
+            self._label, text=status_text("Transcribing…", language)
+        )
         if not self._spinning:
             self._spinning = True
             self._spin()
