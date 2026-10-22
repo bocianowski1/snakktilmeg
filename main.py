@@ -35,6 +35,7 @@ def build_app(config: WhisperConfig, platform: str = sys.platform) -> App:
         transcriber=WhisperTranscriber(
             cli_path=config.whisper_cli_path,
             model_path=config.whisper_model_path,
+            language=config.whisper_language,
         ),
         text_inserter=text_inserter,
         indicator=indicator,

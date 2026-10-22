@@ -150,3 +150,44 @@ def test_load_whisper_config_derives_windows_cli_path(tmp_path) -> None:
     assert config.whisper_cli_path == (
         repo_path / "build" / "bin" / "Release" / "whisper-cli.exe"
     )
+
+
+def test_load_whisper_config_leaves_language_unset_by_default(tmp_path) -> None:
+    config = load_whisper_config(
+        env_file=tmp_path / "missing.env",
+        environ={
+            "WHISPER_REPO_PATH": "/tmp/whisper.cpp",
+            "WHISPER_MODEL_PATH": "/tmp/model.bin",
+            "HOTKEY": "<ctrl>+<alt>+<space>",
+        },
+    )
+
+    assert config.whisper_language is None
+
+
+def test_load_whisper_config_treats_empty_language_as_unset(tmp_path) -> None:
+    config = load_whisper_config(
+        env_file=tmp_path / "missing.env",
+        environ={
+            "WHISPER_REPO_PATH": "/tmp/whisper.cpp",
+            "WHISPER_MODEL_PATH": "/tmp/model.bin",
+            "HOTKEY": "<ctrl>+<alt>+<space>",
+            "WHISPER_LANGUAGE": "  ",
+        },
+    )
+
+    assert config.whisper_language is None
+
+
+def test_load_whisper_config_reads_language(tmp_path) -> None:
+    config = load_whisper_config(
+        env_file=tmp_path / "missing.env",
+        environ={
+            "WHISPER_REPO_PATH": "/tmp/whisper.cpp",
+            "WHISPER_MODEL_PATH": "/tmp/model.bin",
+            "HOTKEY": "<ctrl>+<alt>+<space>",
+            "WHISPER_LANGUAGE": " no ",
+        },
+    )
+
+    assert config.whisper_language == "no"

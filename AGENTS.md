@@ -95,6 +95,8 @@ Expected local environment values:
 WHISPER_REPO_PATH=~/code/div/whisper.cpp
 WHISPER_MODEL_PATH=~/code/div/whisper.cpp/models/ggml-base.en.bin
 HOTKEY=<ctrl>+<alt>+<space>
+# Optional; passed to whisper-cli as -l when set.
+WHISPER_LANGUAGE=no
 ```
 
 The app derives the CLI path as:

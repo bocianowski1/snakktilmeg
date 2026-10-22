@@ -53,15 +53,17 @@ class WhisperTranscriber:
         cli_path: Path,
         model_path: Path,
         runner: CommandRunner = run_command,
+        language: str | None = None,
     ) -> None:
         self.cli_path = cli_path
         self.model_path = model_path
+        self.language = language
         self.runner = runner
 
     @timed
     def transcribe(self, audio_path: Path) -> str:
         self._validate_paths(audio_path)
-        command = [
+        command: list[CommandPart] = [
             self.cli_path,
             "-m",
             self.model_path,
@@ -69,6 +71,8 @@ class WhisperTranscriber:
             audio_path,
             "--no-timestamps",
         ]
+        if self.language is not None:
+            command += ["-l", self.language]
         try:
             result = self.runner(
                 command,

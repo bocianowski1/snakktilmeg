@@ -12,6 +12,7 @@ from lib.errors import ConfigurationError
 WHISPER_REPO_PATH_ENV = "WHISPER_REPO_PATH"
 WHISPER_MODEL_PATH_ENV = "WHISPER_MODEL_PATH"
 HOTKEY_ENV = "HOTKEY"
+WHISPER_LANGUAGE_ENV = "WHISPER_LANGUAGE"
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class WhisperConfig:
     whisper_cli_path: Path
     whisper_model_path: Path
     hotkey: str
+    whisper_language: str | None = None
 
 
 def load_whisper_config(
@@ -34,12 +36,14 @@ def load_whisper_config(
     repo_path = _read_path(values, WHISPER_REPO_PATH_ENV)
     model_path = _read_path(values, WHISPER_MODEL_PATH_ENV)
     hotkey = _read_string(values, HOTKEY_ENV)
+    language = _read_optional_string(values, WHISPER_LANGUAGE_ENV)
 
     return WhisperConfig(
         whisper_repo_path=repo_path,
         whisper_cli_path=whisper_cli_path(repo_path, platform),
         whisper_model_path=model_path,
         hotkey=hotkey,
+        whisper_language=language,
     )
 
 
@@ -78,4 +82,11 @@ def _read_string(values: Mapping[str, str], name: str) -> str:
             operation="load_config",
             variable=name,
         )
+    return value.strip()
+
+
+def _read_optional_string(values: Mapping[str, str], name: str) -> str | None:
+    value = values.get(name)
+    if value is None or not value.strip():
+        return None
     return value.strip()

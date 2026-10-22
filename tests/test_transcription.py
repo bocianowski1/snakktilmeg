@@ -69,6 +69,46 @@ def test_whisper_transcriber_builds_command_and_parses_stdout(tmp_path) -> None:
     assert options == {"capture_output": True, "text": True, "check": True}
 
 
+def test_whisper_transcriber_passes_configured_language(tmp_path) -> None:
+    commands: list[Sequence[str | PathLike[str]]] = []
+    cli_path = tmp_path / "whisper-cli"
+    model_path = tmp_path / "model.bin"
+    audio_path = tmp_path / "audio.wav"
+    cli_path.touch()
+    model_path.touch()
+    audio_path.touch()
+
+    def runner(
+        args: Sequence[str | PathLike[str]],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="hei")
+
+    WhisperTranscriber(
+        cli_path=cli_path,
+        model_path=model_path,
+        runner=runner,
+        language="no",
+    ).transcribe(audio_path)
+
+    assert commands == [
+        [
+            cli_path,
+            "-m",
+            model_path,
+            "-f",
+            audio_path,
+            "--no-timestamps",
+            "-l",
+            "no",
+        ]
+    ]
+
+
 def test_whisper_transcriber_rejects_missing_cli_path(tmp_path) -> None:
     model_path = tmp_path / "model.bin"
     audio_path = tmp_path / "audio.wav"

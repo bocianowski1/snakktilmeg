@@ -28,6 +28,13 @@ WHISPER_MODEL_PATH=~/code/div/whisper.cpp/models/ggml-base.en.bin
 HOTKEY=<ctrl>+<alt>+<space>
 ```
 
+Set the optional `WHISPER_LANGUAGE` to pass `-l <language>` to whisper, for example `no` for Norwegian or `auto` to detect the language. Leave it unset to use whisper's default, English. A language other than English needs a multilingual model (one without `.en` in the name), for example `ggml-small.bin`, or a Norwegian-tuned NB-Whisper model from the National Library of Norway (`NbAiLab` on Hugging Face):
+
+```sh
+WHISPER_MODEL_PATH=~/code/div/whisper.cpp/models/ggml-small.bin
+WHISPER_LANGUAGE=no
+```
+
 If `whisper.cpp` is not already built, build it and download the configured model before running this app. The app derives the CLI path from `WHISPER_REPO_PATH`:
 
 - macOS: `WHISPER_REPO_PATH/build/bin/whisper-cli`
