@@ -1,4 +1,5 @@
 import subprocess
+import sys
 from collections.abc import Sequence
 from os import PathLike
 from pathlib import Path
@@ -9,6 +10,7 @@ from lib.utils import timed
 
 
 TRANSCRIPT_NOISE_DELIMITER = "whisper_init_from_file_with_params_no_state"
+CREATE_NO_WINDOW = 0x08000000
 CommandPart = str | PathLike[str]
 Command = Sequence[CommandPart]
 
@@ -33,6 +35,7 @@ def run_command(
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args,
+        stdin=subprocess.DEVNULL,
         capture_output=capture_output,
         text=text,
         # whisper.cpp prints UTF-8; Windows would otherwise decode with the
@@ -40,6 +43,8 @@ def run_command(
         encoding="utf-8" if text else None,
         errors="replace" if text else None,
         check=check,
+        # Keep whisper-cli from flashing a console window in windowed builds.
+        creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
 
 

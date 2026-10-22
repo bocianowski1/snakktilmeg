@@ -37,3 +37,11 @@ class IndicatorError(SnakktilmegError):
 
 class ConfigurationError(SnakktilmegError):
     pass
+
+
+class ModelDownloadError(SnakktilmegError):
+    pass
+
+
+class TrayError(SnakktilmegError):
+    pass

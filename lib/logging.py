@@ -1,7 +1,13 @@
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 from datetime import UTC, datetime
+from pathlib import Path
+import sys
 from typing import Any
+
+LOG_FILE_MAX_BYTES = 1024 * 1024
+LOG_FILE_BACKUP_COUNT = 3
 
 
 _RESERVED_RECORD_FIELDS = {
@@ -50,13 +56,30 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str, separators=(",", ":"))
 
 
-def configure_logging(level: int = logging.INFO) -> None:
-    handler = logging.StreamHandler()
-    handler.setFormatter(JsonFormatter())
+def configure_logging(
+    level: int = logging.INFO,
+    log_file: Path | None = None,
+) -> None:
+    handlers: list[logging.Handler] = []
+    # Windowed (no console) builds have no stderr to write to.
+    if sys.stderr is not None:
+        handlers.append(logging.StreamHandler())
+    if log_file is not None:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(
+            RotatingFileHandler(
+                log_file,
+                maxBytes=LOG_FILE_MAX_BYTES,
+                backupCount=LOG_FILE_BACKUP_COUNT,
+                encoding="utf-8",
+            )
+        )
 
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
-    root_logger.addHandler(handler)
+    for handler in handlers:
+        handler.setFormatter(JsonFormatter())
+        root_logger.addHandler(handler)
     root_logger.setLevel(level)
 
 

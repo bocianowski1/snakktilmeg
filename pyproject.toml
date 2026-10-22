@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "numpy>=2.5.2",
+    "pillow>=11.0.0; sys_platform == 'win32'",
     "pynput>=1.8.1",
+    "pystray>=0.19.5; sys_platform == 'win32'",
     "pyobjc-framework-Cocoa>=12.2.2; sys_platform == 'darwin'",
     "pyobjc-framework-Quartz>=12.2.2; sys_platform == 'darwin'",
     "python-dotenv>=1.2.3",
@@ -14,6 +16,9 @@ dependencies = [
 ]
 
 [dependency-groups]
+build = [
+    "pyinstaller>=6.11.0",
+]
 dev = [
     "pyright>=1.1.403",
     "pytest==8.2.2",

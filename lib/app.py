@@ -57,7 +57,13 @@ class ActivityIndicator(Protocol):
 
     def show_transcribing(self, language: str | None) -> None: ...
 
+    def show_message(self, text: str) -> None: ...
+
     def hide(self) -> None: ...
+
+
+class ModelProvisioner(Protocol):
+    def ensure(self, on_progress: Callable[[float], None]) -> None: ...
 
 
 class NullTextInserter:
@@ -78,12 +84,16 @@ class App:
         logger: logging.Logger | None = None,
         language_transcribers: Mapping[str, Transcriber] | None = None,
         default_language: str | None = None,
+        model_provisioner: ModelProvisioner | None = None,
+        log_transcripts: bool = True,
     ) -> None:
         self.recorder = recorder
         self.transcriber = transcriber
         self.language_transcribers = dict(language_transcribers or {})
         self.language: str | None = None
         self.default_language = default_language
+        self.model_provisioner = model_provisioner
+        self.log_transcripts = log_transcripts
         self.text_inserter = text_inserter or NullTextInserter()
         self.indicator = indicator
         self.logger = logger or get_logger(__name__)
@@ -92,6 +102,7 @@ class App:
         self._worker: threading.Thread | None = None
         self._listener: HotkeyListener | None = None
         self._listener_worker: threading.Thread | None = None
+        self._provisioning_worker: threading.Thread | None = None
         self._shutdown_started = False
 
     def run(self, out_path: Path = Path("recording.wav")) -> None:
@@ -129,11 +140,12 @@ class App:
                     operation="prepare_indicator",
                 )
                 self.indicator = None
-            else:
-                self._run_hotkey_loop_with_indicator(listener, out_path)
-                return
 
-        self._run_blocking_hotkey_loop(listener, out_path)
+        self._start_model_provisioning()
+        if self.indicator is not None:
+            self._run_hotkey_loop_with_indicator(listener, out_path)
+        else:
+            self._run_blocking_hotkey_loop(listener, out_path)
 
     def _run_blocking_hotkey_loop(
         self,
@@ -249,7 +261,10 @@ class App:
 
         self.logger.info(
             "hotkey ignored",
-            extra={"event": "hotkey_ignored", "reason": "busy"},
+            extra={
+                "event": "hotkey_ignored",
+                "reason": "preparing" if state == "preparing" else "busy",
+            },
         )
 
     def select_language(self, language: str) -> None:
@@ -272,6 +287,11 @@ class App:
                 "previous_language": previous_language,
             },
         )
+
+    def wait_for_model_provisioning(self) -> None:
+        worker = self._provisioning_worker
+        if worker is not None:
+            worker.join()
 
     def wait_for_pending_work(self) -> None:
         worker = self._worker
@@ -346,6 +366,59 @@ class App:
             "shutdown complete",
             extra={"event": "shutdown_complete"},
         )
+
+    def _start_model_provisioning(self) -> None:
+        provisioner = self.model_provisioner
+        if provisioner is None:
+            return
+        with self._lock:
+            self._state = "preparing"
+        self._provisioning_worker = threading.Thread(
+            target=self._provision_models,
+            args=(provisioner,),
+            name="model-provisioning",
+            daemon=True,
+        )
+        self._provisioning_worker.start()
+
+    def _provision_models(self, provisioner: ModelProvisioner) -> None:
+        last_percent: int | None = None
+
+        def on_progress(fraction: float) -> None:
+            nonlocal last_percent
+            percent = int(fraction * 100)
+            if percent == last_percent:
+                return
+            if last_percent is None:
+                self.logger.info(
+                    "model download started",
+                    extra={"event": "models_download_started"},
+                )
+            last_percent = percent
+            self._update_indicator("show_message", f"Downloading… {percent}%")
+            if percent % 10 == 0:
+                self.logger.info(
+                    "model download progress",
+                    extra={"event": "models_download_progress", "percent": percent},
+                )
+
+        try:
+            provisioner.ensure(on_progress)
+        except Exception as error:
+            self._log_exception(
+                "model download failed",
+                "models_download_failed",
+                error,
+                operation="provision_models",
+            )
+        else:
+            self.logger.info("models ready", extra={"event": "models_ready"})
+        finally:
+            with self._lock:
+                if self._state == "preparing":
+                    self._state = "idle"
+            if last_percent is not None:
+                self._update_indicator("hide")
 
     def _finish_recording(self, out_path: Path, transcriber: Transcriber) -> None:
         try:
@@ -430,9 +503,15 @@ class App:
             )
             return
 
+        # Packaged builds log to disk, so they can keep dictated text out.
+        details: dict[str, object] = (
+            {"transcript": transcript}
+            if self.log_transcripts
+            else {"transcript_length": len(transcript)}
+        )
         self.logger.info(
             "transcript ready",
-            extra={"event": "transcript_ready", "transcript": transcript},
+            extra={"event": "transcript_ready", **details},
         )
         self.text_inserter.insert(transcript)
 

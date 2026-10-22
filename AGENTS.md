@@ -23,7 +23,13 @@ easy to extend.
   - `lib/windows_indicator.py`: Windows `tkinter` status overlay.
   - `lib/hotkeys.py`: global hotkey listener through `pynput`.
   - `lib/config.py`: environment and `.env` configuration.
-  - `lib/logging.py`: JSON logging setup.
+  - `lib/logging.py`: JSON logging setup, to stderr and/or a rotating file.
+  - `lib/models.py`: first-run model download with SHA-256 verification.
+  - `lib/bundle.py`: packaged (PyInstaller) detection, data directory, and
+    built-in defaults for the packaged Windows app.
+  - `lib/tray.py`: Windows notification-area icon (language choice, Quit).
+- `packaging/build_windows.ps1` builds the Windows zip; the
+  `.github/workflows/windows-build.yml` workflow runs tests and that script.
 - `tests/` mirrors the production modules and should stay fast and mostly
   unit-level.
 

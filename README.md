@@ -71,6 +71,28 @@ On Windows with a Norwegian or other layout that uses `AltGr`, `Ctrl` + `Alt` is
 
 Press `Ctrl-C` in the terminal to shut the app down cleanly. If the app is only listening for the hotkey, it exits immediately. If a recording is active, the partial audio is discarded without transcription or paste. If transcription or paste is already in progress, shutdown waits for that work to finish before exiting.
 
+## Packaged Windows app
+
+Colleagues can use a packaged build without Python, `uv`, git or a `whisper.cpp` checkout. The zip contains `snakktilmeg.exe` (built with PyInstaller) and a prebuilt `whisper-cli.exe` from the pinned `whisper.cpp` Windows release.
+
+**Using it:** unpack `snakktilmeg-windows-x64.zip` anywhere and run `snakktilmeg\snakktilmeg.exe`. There is no console window; the app lives in the notification area (by the clock), where you can pick the language or quit.
+
+On first run it downloads the models (about 640 MB) to `%LOCALAPPDATA%\snakktilmeg\models`, showing progress in the status pill. Downloads come from pinned Hugging Face revisions and are verified with SHA-256. Hotkeys are ignored until the download finishes. If it fails, the error is in the log and the next start retries.
+
+| | |
+|---|---|
+| Dictate | `Ctrl` + `Alt` + `Space` (= `AltGr` + `Space`) |
+| English (`ggml-base.en`) | `AltGr` + `E` |
+| Norwegian (NB-Whisper small, default) | `AltGr` + `N` |
+
+**Settings:** optional, in `%LOCALAPPDATA%\snakktilmeg\settings.env`, using the same variables as `.env` above. Values there override the built-in defaults, for example `HOTKEY=<ctrl>+<shift>+<space>`.
+
+**Logs:** `%LOCALAPPDATA%\snakktilmeg\logs\snakktilmeg.log` (JSON lines, rotated at 1 MB). Packaged builds log only the transcript length, not the dictated text.
+
+**Building:** on Windows, run `./packaging/build_windows.ps1` from PowerShell. It writes `dist/snakktilmeg-windows-x64.zip`. The `Windows build` GitHub Actions workflow runs the tests and the same script; run it manually to get the zip as a build artifact, or push a `v*` tag to also publish it as a GitHub release.
+
+The executable is not code-signed. Windows SmartScreen and antivirus tools may warn about or block it, because it installs a global keyboard hook and sends keystrokes. Check with IT before sharing it, and sign it for wider distribution. Everything runs locally: no audio or text leaves the PC; the only network access is the one-time model download.
+
 ## Tests
 
 Run the unit test suite:

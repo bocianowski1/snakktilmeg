@@ -5,6 +5,7 @@ import threading
 
 from lib.app import App
 from lib.errors import HotkeyError
+from lib.errors import ModelDownloadError
 from lib.errors import RecordingError
 from lib.errors import TextInsertionError
 from lib.errors import TranscriptionError
@@ -84,6 +85,8 @@ class FakeIndicator:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.languages: list[str | None] = []
+        self.messages: list[str] = []
+        self.running = threading.Event()
         self.stopped = threading.Event()
 
     def prepare(self) -> None:
@@ -91,6 +94,7 @@ class FakeIndicator:
 
     def run(self) -> None:
         self.calls.append("run")
+        self.running.set()
         self.stopped.wait(timeout=5)
 
     def stop(self) -> None:
@@ -104,6 +108,10 @@ class FakeIndicator:
     def show_transcribing(self, language: str | None) -> None:
         self.calls.append("transcribing")
         self.languages.append(language)
+
+    def show_message(self, text: str) -> None:
+        self.calls.append("message")
+        self.messages.append(text)
 
     def hide(self) -> None:
         self.calls.append("hide")
@@ -611,8 +619,19 @@ def test_listener_failure_stops_indicator_event_loop(tmp_path, caplog) -> None:
         indicator=indicator,
     )
 
+    class FailingAfterIndicatorStartsListener(FailingListener):
+        # The listener runs on its own thread; fail only once the indicator
+        # event loop is running so the call order is deterministic.
+        def run(
+            self,
+            on_press: Callable[[], None],
+            on_select_language: Callable[[str], None],
+        ) -> None:
+            indicator.running.wait(timeout=5)
+            super().run(on_press, on_select_language)
+
     with caplog.at_level(logging.INFO):
-        app.run_hotkey_loop(FailingListener(), tmp_path)
+        app.run_hotkey_loop(FailingAfterIndicatorStartsListener(), tmp_path)
 
     assert indicator.calls == ["prepare", "run", "hide", "stop"]
     assert [record.event for record in caplog.records] == [
@@ -823,3 +842,146 @@ def test_recording_started_log_includes_language(tmp_path, caplog) -> None:
 
     assert caplog.records[0].event == "recording_started"
     assert caplog.records[0].language == "no"
+
+
+class FakeProvisioner:
+    def __init__(
+        self,
+        progress: list[float] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.progress = progress or []
+        self.error = error
+        self.release = threading.Event()
+        self.release.set()
+
+    def ensure(self, on_progress: Callable[[float], None]) -> None:
+        self.release.wait(timeout=5)
+        for fraction in self.progress:
+            on_progress(fraction)
+        if self.error is not None:
+            raise self.error
+
+
+class StoppingListener:
+    def __init__(self, app: App) -> None:
+        self.app = app
+
+    def run(
+        self,
+        on_press: Callable[[], None],
+        on_select_language: Callable[[str], None],
+    ) -> None:
+        self.app.wait_for_model_provisioning()
+        self.app.shutdown()
+
+    def stop(self) -> None:
+        pass
+
+
+def test_hotkey_is_ignored_while_models_are_downloading(tmp_path, caplog) -> None:
+    provisioner = FakeProvisioner()
+    provisioner.release.clear()
+    recorder = FakeRecorder()
+    app = App(
+        recorder=recorder,
+        transcriber=FakeTranscriber(),
+        model_provisioner=provisioner,
+    )
+
+    def press_while_preparing(on_press: Callable[[], None]) -> None:
+        on_press()
+        provisioner.release.set()
+        app.wait_for_model_provisioning()
+        on_press()
+
+    with caplog.at_level(logging.INFO):
+        app.run_hotkey_loop(InterruptingListener(press_while_preparing), tmp_path)
+
+    assert recorder.started == 1
+    ignored = [r for r in caplog.records if r.event == "hotkey_ignored"]
+    assert [r.reason for r in ignored] == ["preparing"]
+
+
+def test_model_download_progress_is_shown_and_logged(tmp_path, caplog) -> None:
+    indicator = FakeIndicator()
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=FakeTranscriber(),
+        indicator=indicator,
+        model_provisioner=FakeProvisioner([0.0, 0.004, 0.5, 1.0]),
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.run_hotkey_loop(StoppingListener(app), tmp_path)
+
+    assert indicator.messages == [
+        "Downloading… 0%",
+        "Downloading… 50%",
+        "Downloading… 100%",
+    ]
+    events = [record.event for record in caplog.records]
+    assert events.count("models_download_started") == 1
+    assert "models_ready" in events
+    assert [
+        record.percent
+        for record in caplog.records
+        if record.event == "models_download_progress"
+    ] == [0, 50, 100]
+
+
+def test_models_already_present_do_not_touch_indicator(tmp_path, caplog) -> None:
+    indicator = FakeIndicator()
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=FakeTranscriber(),
+        indicator=indicator,
+        model_provisioner=FakeProvisioner(),
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.run_hotkey_loop(StoppingListener(app), tmp_path)
+
+    assert "message" not in indicator.calls
+    assert "models_ready" in [record.event for record in caplog.records]
+
+
+def test_model_download_failure_is_logged_and_app_becomes_idle(
+    tmp_path, caplog
+) -> None:
+    recorder = FakeRecorder()
+    app = App(
+        recorder=recorder,
+        transcriber=FakeTranscriber(),
+        model_provisioner=FakeProvisioner(
+            [0.1], error=ModelDownloadError("offline", operation="download_model")
+        ),
+    )
+
+    def press_after_failure(on_press: Callable[[], None]) -> None:
+        app.wait_for_model_provisioning()
+        on_press()
+
+    with caplog.at_level(logging.INFO):
+        app.run_hotkey_loop(InterruptingListener(press_after_failure), tmp_path)
+
+    failures = [r for r in caplog.records if r.event == "models_download_failed"]
+    assert failures[0].error_type == "ModelDownloadError"
+    assert recorder.started == 1
+
+
+def test_transcript_text_can_be_kept_out_of_logs(tmp_path, caplog) -> None:
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=FakeTranscriber("secret words"),
+        log_transcripts=False,
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.handle_hotkey(tmp_path)
+        app.handle_hotkey(tmp_path)
+        app.wait_for_pending_work()
+
+    ready = [r for r in caplog.records if r.event == "transcript_ready"][0]
+    assert ready.transcript_length == len("secret words")
+    assert not hasattr(ready, "transcript")

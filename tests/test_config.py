@@ -242,3 +242,35 @@ def test_load_whisper_config_requires_hotkey_for_language_profile(tmp_path) -> N
 
     assert str(error.value) == "missing required environment variable"
     assert error.value.context["variable"] == "HOTKEY_NO"
+
+
+def test_load_whisper_config_uses_cli_path_override_without_repo(tmp_path) -> None:
+    config = load_whisper_config(
+        env_file=tmp_path / "missing.env",
+        environ={
+            "WHISPER_CLI_PATH": "/opt/whisper/whisper-cli.exe",
+            "WHISPER_MODEL_PATH": "/tmp/model.bin",
+            "HOTKEY": "<ctrl>+<alt>+<space>",
+        },
+    )
+
+    assert config.whisper_repo_path is None
+    assert config.whisper_cli_path == Path("/opt/whisper/whisper-cli.exe")
+
+
+def test_load_whisper_config_environment_overrides_defaults(tmp_path) -> None:
+    config = load_whisper_config(
+        env_file=tmp_path / "missing.env",
+        environ={"HOTKEY": "<ctrl>+<shift>+<space>"},
+        defaults={
+            "WHISPER_CLI_PATH": "/app/whisper-cli.exe",
+            "WHISPER_MODEL_PATH": "/data/model.bin",
+            "HOTKEY": "<ctrl>+<alt>+<space>",
+            "WHISPER_LANGUAGE": "no",
+        },
+    )
+
+    assert config.whisper_cli_path == Path("/app/whisper-cli.exe")
+    assert config.whisper_model_path == Path("/data/model.bin")
+    assert config.whisper_language == "no"
+    assert config.hotkey == "<ctrl>+<shift>+<space>"

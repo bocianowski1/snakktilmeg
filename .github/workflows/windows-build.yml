@@ -1,0 +1,42 @@
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Test
+        run: |
+          uv sync
+          uv run pytest
+
+      - name: Build
+        shell: pwsh
+        run: ./packaging/build_windows.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snakktilmeg-windows-x64
+          path: dist/snakktilmeg-windows-x64.zip
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}"
+          dist/snakktilmeg-windows-x64.zip
+          --title "snakktilmeg ${{ github.ref_name }}"
+          --generate-notes

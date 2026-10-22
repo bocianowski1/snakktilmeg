@@ -112,6 +112,9 @@ class WindowsActivityIndicator:
     def show_transcribing(self, language: str | None = None) -> None:
         self._dispatch(self._show_transcribing, language)
 
+    def show_message(self, text: str) -> None:
+        self._dispatch(self._show_message, text)
+
     def hide(self) -> None:
         self._dispatch(self._hide)
 
@@ -246,11 +249,15 @@ class WindowsActivityIndicator:
         self._show_on_focused_display()
 
     def _show_transcribing(self, language: str | None) -> None:
+        self._show_busy(status_text("Transcribing…", language))
+
+    def _show_message(self, text: str) -> None:
+        self._show_busy(text)
+
+    def _show_busy(self, text: str) -> None:
         self._canvas.itemconfigure(self._dot, state="hidden")
         self._canvas.itemconfigure(self._spinner, state="normal")
-        self._canvas.itemconfigure(
-            self._label, text=status_text("Transcribing…", language)
-        )
+        self._canvas.itemconfigure(self._label, text=text)
         if not self._spinning:
             self._spinning = True
             self._spin()

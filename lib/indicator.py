@@ -111,6 +111,9 @@ class MacOSActivityIndicator:
     def show_transcribing(self, language: str | None = None) -> None:
         self._dispatch(self._show_transcribing, language)
 
+    def show_message(self, text: str) -> None:
+        self._dispatch(self._show_message, text)
+
     def hide(self) -> None:
         self._dispatch(self._hide)
 
@@ -241,13 +244,19 @@ class MacOSActivityIndicator:
         self._panel.orderFrontRegardless()
 
     def _show_transcribing(self, language: str | None) -> None:
+        self._show_busy(status_text("Transcribing…", language))
+
+    def _show_message(self, text: str) -> None:
+        self._show_busy(text)
+
+    def _show_busy(self, text: str) -> None:
         if self._session_screen is None:
             self._session_screen = self._focused_screen()
             self._position_on_screen(self._session_screen)
         self._icon.setHidden_(True)
         self._spinner.setHidden_(False)
         self._spinner.startAnimation_(None)
-        self._label.setStringValue_(status_text("Transcribing…", language))
+        self._label.setStringValue_(text)
         self._panel.orderFrontRegardless()
 
     def _hide(self) -> None:
