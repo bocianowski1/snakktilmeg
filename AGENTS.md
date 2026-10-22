@@ -97,6 +97,11 @@ WHISPER_MODEL_PATH=~/code/div/whisper.cpp/models/ggml-base.en.bin
 HOTKEY=<ctrl>+<alt>+<space>
 # Optional; passed to whisper-cli as -l when set.
 WHISPER_LANGUAGE=no
+# Optional language profiles, switched with their hotkey at runtime.
+WHISPER_MODEL_PATH_EN=~/code/div/whisper.cpp/models/ggml-base.en.bin
+HOTKEY_EN=<ctrl>+<alt>+e
+WHISPER_MODEL_PATH_NO=~/code/div/whisper.cpp/models/ggml-nb-whisper-small.bin
+HOTKEY_NO=<ctrl>+<alt>+n
 ```
 
 The app derives the CLI path as:

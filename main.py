@@ -39,13 +39,27 @@ def build_app(config: WhisperConfig, platform: str = sys.platform) -> App:
         ),
         text_inserter=text_inserter,
         indicator=indicator,
+        language_transcribers={
+            profile.language: WhisperTranscriber(
+                cli_path=config.whisper_cli_path,
+                model_path=profile.model_path,
+                language=profile.language,
+            )
+            for profile in config.language_profiles
+        },
     )
 
 
 def main() -> None:
     configure_logging()
     config = load_whisper_config()
-    build_app(config).run_hotkey_loop(PynputHotkeyListener(config.hotkey))
+    listener = PynputHotkeyListener(
+        config.hotkey,
+        language_hotkeys={
+            profile.language: profile.hotkey for profile in config.language_profiles
+        },
+    )
+    build_app(config).run_hotkey_loop(listener)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import logging
 from pathlib import Path
 import tempfile
@@ -37,7 +37,11 @@ class TextInserter(Protocol):
 
 
 class HotkeyListener(Protocol):
-    def run(self, on_press: Callable[[], None]) -> None: ...
+    def run(
+        self,
+        on_press: Callable[[], None],
+        on_select_language: Callable[[str], None],
+    ) -> None: ...
 
     def stop(self) -> None: ...
 
@@ -72,9 +76,12 @@ class App:
         text_inserter: TextInserter | None = None,
         indicator: ActivityIndicator | None = None,
         logger: logging.Logger | None = None,
+        language_transcribers: Mapping[str, Transcriber] | None = None,
     ) -> None:
         self.recorder = recorder
         self.transcriber = transcriber
+        self.language_transcribers = dict(language_transcribers or {})
+        self.language: str | None = None
         self.text_inserter = text_inserter or NullTextInserter()
         self.indicator = indicator
         self.logger = logger or get_logger(__name__)
@@ -132,7 +139,7 @@ class App:
         out_path: Path,
     ) -> None:
         try:
-            listener.run(lambda: self.handle_hotkey(out_path))
+            listener.run(lambda: self.handle_hotkey(out_path), self.select_language)
         except KeyboardInterrupt:
             self.shutdown()
         except HotkeyError as error:
@@ -158,7 +165,7 @@ class App:
     ) -> None:
         def listen() -> None:
             try:
-                listener.run(lambda: self.handle_hotkey(out_path))
+                listener.run(lambda: self.handle_hotkey(out_path), self.select_language)
             except HotkeyError as error:
                 self._log_exception(
                     "hotkey listener failed",
@@ -227,9 +234,11 @@ class App:
                     extra={"event": "transcribing_started"},
                 )
                 self._update_indicator("show_transcribing")
+                # Bind the transcriber now so a language switch during
+                # transcription only affects the next recording.
                 self._worker = threading.Thread(
                     target=self._finish_recording,
-                    args=(out_path,),
+                    args=(out_path, self._active_transcriber()),
                     daemon=True,
                 )
                 self._worker.start()
@@ -238,6 +247,22 @@ class App:
         self.logger.info(
             "hotkey ignored",
             extra={"event": "hotkey_ignored", "reason": "busy"},
+        )
+
+    def select_language(self, language: str) -> None:
+        with self._lock:
+            known = language in self.language_transcribers
+            if known:
+                self.language = language
+        if not known:
+            self.logger.warning(
+                "unknown language selected",
+                extra={"event": "language_unknown", "language": language},
+            )
+            return
+        self.logger.info(
+            "language selected",
+            extra={"event": "language_selected", "language": language},
         )
 
     def wait_for_pending_work(self) -> None:
@@ -314,10 +339,10 @@ class App:
             extra={"event": "shutdown_complete"},
         )
 
-    def _finish_recording(self, out_path: Path) -> None:
+    def _finish_recording(self, out_path: Path, transcriber: Transcriber) -> None:
         try:
             self.recorder.stop_recording(out_path)
-            self._transcribe_output_and_insert(out_path)
+            self._transcribe_output_and_insert(out_path, transcriber)
         except RecordingError as error:
             self._log_exception(
                 "recording stop failed",
@@ -375,8 +400,17 @@ class App:
                 operation=operation,
             )
 
-    def _transcribe_output_and_insert(self, out_path: Path) -> None:
-        transcript = self.transcriber.transcribe(out_path)
+    def _active_transcriber(self) -> Transcriber:
+        if self.language is None:
+            return self.transcriber
+        return self.language_transcribers[self.language]
+
+    def _transcribe_output_and_insert(
+        self,
+        out_path: Path,
+        transcriber: Transcriber | None = None,
+    ) -> None:
+        transcript = (transcriber or self._active_transcriber()).transcribe(out_path)
         if not transcript:
             self.logger.info(
                 "empty transcript",

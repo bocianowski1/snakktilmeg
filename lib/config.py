@@ -13,6 +13,15 @@ WHISPER_REPO_PATH_ENV = "WHISPER_REPO_PATH"
 WHISPER_MODEL_PATH_ENV = "WHISPER_MODEL_PATH"
 HOTKEY_ENV = "HOTKEY"
 WHISPER_LANGUAGE_ENV = "WHISPER_LANGUAGE"
+LANGUAGE_MODEL_PATH_ENV_PREFIX = "WHISPER_MODEL_PATH_"
+LANGUAGE_HOTKEY_ENV_PREFIX = "HOTKEY_"
+
+
+@dataclass(frozen=True)
+class LanguageProfile:
+    language: str
+    model_path: Path
+    hotkey: str
 
 
 @dataclass(frozen=True)
@@ -22,6 +31,7 @@ class WhisperConfig:
     whisper_model_path: Path
     hotkey: str
     whisper_language: str | None = None
+    language_profiles: tuple[LanguageProfile, ...] = ()
 
 
 def load_whisper_config(
@@ -37,6 +47,7 @@ def load_whisper_config(
     model_path = _read_path(values, WHISPER_MODEL_PATH_ENV)
     hotkey = _read_string(values, HOTKEY_ENV)
     language = _read_optional_string(values, WHISPER_LANGUAGE_ENV)
+    language_profiles = _read_language_profiles(values)
 
     return WhisperConfig(
         whisper_repo_path=repo_path,
@@ -44,6 +55,7 @@ def load_whisper_config(
         whisper_model_path=model_path,
         hotkey=hotkey,
         whisper_language=language,
+        language_profiles=language_profiles,
     )
 
 
@@ -90,3 +102,23 @@ def _read_optional_string(values: Mapping[str, str], name: str) -> str | None:
     if value is None or not value.strip():
         return None
     return value.strip()
+
+
+def _read_language_profiles(values: Mapping[str, str]) -> tuple[LanguageProfile, ...]:
+    # Each WHISPER_MODEL_PATH_<CODE> enables a switchable language whose code
+    # is passed to whisper as -l <code> and selected with HOTKEY_<CODE>.
+    profiles: list[LanguageProfile] = []
+    for name in sorted(values):
+        if not name.startswith(LANGUAGE_MODEL_PATH_ENV_PREFIX):
+            continue
+        suffix = name.removeprefix(LANGUAGE_MODEL_PATH_ENV_PREFIX)
+        if not suffix or not values[name].strip():
+            continue
+        profiles.append(
+            LanguageProfile(
+                language=suffix.lower(),
+                model_path=_read_path(values, name),
+                hotkey=_read_string(values, LANGUAGE_HOTKEY_ENV_PREFIX + suffix),
+            )
+        )
+    return tuple(profiles)

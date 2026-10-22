@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from lib.config import LanguageProfile
 from lib.config import load_whisper_config
 from lib.errors import ConfigurationError
 
@@ -191,3 +192,53 @@ def test_load_whisper_config_reads_language(tmp_path) -> None:
     )
 
     assert config.whisper_language == "no"
+
+
+def test_load_whisper_config_reads_language_profiles(tmp_path) -> None:
+    config = load_whisper_config(
+        env_file=tmp_path / "missing.env",
+        environ={
+            "WHISPER_REPO_PATH": "/tmp/whisper.cpp",
+            "WHISPER_MODEL_PATH": "/tmp/model.bin",
+            "HOTKEY": "<ctrl>+<alt>+<space>",
+            "WHISPER_MODEL_PATH_NO": "/tmp/nb.bin",
+            "HOTKEY_NO": "<ctrl>+<alt>+n",
+            "WHISPER_MODEL_PATH_EN": "~/en.bin",
+            "HOTKEY_EN": "<ctrl>+<alt>+e",
+        },
+    )
+
+    assert config.language_profiles == (
+        LanguageProfile("en", Path.home() / "en.bin", "<ctrl>+<alt>+e"),
+        LanguageProfile("no", Path("/tmp/nb.bin"), "<ctrl>+<alt>+n"),
+    )
+
+
+def test_load_whisper_config_has_no_language_profiles_by_default(tmp_path) -> None:
+    config = load_whisper_config(
+        env_file=tmp_path / "missing.env",
+        environ={
+            "WHISPER_REPO_PATH": "/tmp/whisper.cpp",
+            "WHISPER_MODEL_PATH": "/tmp/model.bin",
+            "HOTKEY": "<ctrl>+<alt>+<space>",
+            "WHISPER_MODEL_PATH_EN": "  ",
+        },
+    )
+
+    assert config.language_profiles == ()
+
+
+def test_load_whisper_config_requires_hotkey_for_language_profile(tmp_path) -> None:
+    with pytest.raises(ConfigurationError) as error:
+        load_whisper_config(
+            env_file=tmp_path / "missing.env",
+            environ={
+                "WHISPER_REPO_PATH": "/tmp/whisper.cpp",
+                "WHISPER_MODEL_PATH": "/tmp/model.bin",
+                "HOTKEY": "<ctrl>+<alt>+<space>",
+                "WHISPER_MODEL_PATH_NO": "/tmp/nb.bin",
+            },
+        )
+
+    assert str(error.value) == "missing required environment variable"
+    assert error.value.context["variable"] == "HOTKEY_NO"

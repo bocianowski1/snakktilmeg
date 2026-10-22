@@ -35,6 +35,19 @@ WHISPER_MODEL_PATH=~/code/div/whisper.cpp/models/ggml-small.bin
 WHISPER_LANGUAGE=no
 ```
 
+### Switching language with a hotkey
+
+To switch between languages without restarting, add a model and hotkey per language. Each `WHISPER_MODEL_PATH_<CODE>` needs a matching `HOTKEY_<CODE>`, and the lowercased code is passed to whisper as `-l <code>`:
+
+```sh
+WHISPER_MODEL_PATH_EN=~/code/div/whisper.cpp/models/ggml-base.en.bin
+HOTKEY_EN=<ctrl>+<alt>+e
+WHISPER_MODEL_PATH_NO=~/code/div/whisper.cpp/models/ggml-nb-whisper-small.bin
+HOTKEY_NO=<ctrl>+<alt>+n
+```
+
+The app starts with `WHISPER_MODEL_PATH`/`WHISPER_LANGUAGE` and switches when you press a language hotkey. The switch applies from the next recording; a transcription already in progress keeps its language. Each switch is logged with event `language_selected`. Hotkeys are not swallowed, so the focused app also sees them: avoid plain letters and combinations your apps use. On Windows, `AltGr` is the same as `Ctrl` + `Alt`, so `<ctrl>+<alt>+e` fires for both `Ctrl` + `AltGr` + `E` and `AltGr` + `E`; write it as `<ctrl>+<alt>`, because `<alt_gr>` never matches. On a Norwegian layout `AltGr` + `E` also types `€` into the focused app. Letters in hotkeys match by key position on Windows, so these combinations work on Nordic layouts.
+
 If `whisper.cpp` is not already built, build it and download the configured model before running this app. The app derives the CLI path from `WHISPER_REPO_PATH`:
 
 - macOS: `WHISPER_REPO_PATH/build/bin/whisper-cli`

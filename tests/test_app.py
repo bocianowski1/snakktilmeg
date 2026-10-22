@@ -56,7 +56,11 @@ class InterruptingListener:
     def __init__(self, before_interrupt: Callable[[Callable[[], None]], None]) -> None:
         self.before_interrupt = before_interrupt
 
-    def run(self, on_press: Callable[[], None]) -> None:
+    def run(
+        self,
+        on_press: Callable[[], None],
+        on_select_language: Callable[[str], None],
+    ) -> None:
         self.before_interrupt(on_press)
         raise KeyboardInterrupt
 
@@ -65,7 +69,11 @@ class InterruptingListener:
 
 
 class FailingListener:
-    def run(self, on_press: Callable[[], None]) -> None:
+    def run(
+        self,
+        on_press: Callable[[], None],
+        on_select_language: Callable[[str], None],
+    ) -> None:
         raise HotkeyError("listener unavailable", operation="hotkey_listener")
 
     def stop(self) -> None:
@@ -108,7 +116,11 @@ class BlockingListener:
         self.started = threading.Event()
         self.stopped = threading.Event()
 
-    def run(self, on_press: Callable[[], None]) -> None:
+    def run(
+        self,
+        on_press: Callable[[], None],
+        on_select_language: Callable[[str], None],
+    ) -> None:
         self.started.set()
         self.stopped.wait(timeout=5)
 
@@ -656,3 +668,99 @@ def test_shutdown_logs_discard_failure(tmp_path, caplog) -> None:
         "recording_discard_failed",
         "shutdown_complete",
     ]
+
+
+def test_selected_language_transcriber_is_used_for_next_recording(tmp_path) -> None:
+    default = FakeTranscriber("default")
+    norwegian = FakeTranscriber("hei")
+    text_inserter = FakeTextInserter()
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=default,
+        text_inserter=text_inserter,
+        language_transcribers={"no": norwegian},
+    )
+
+    app.select_language("no")
+    app.handle_hotkey(tmp_path)
+    app.handle_hotkey(tmp_path)
+    app.wait_for_pending_work()
+
+    assert app.language == "no"
+    assert default.calls == []
+    assert norwegian.calls == [tmp_path]
+    assert text_inserter.calls == ["hei"]
+
+
+def test_language_switch_during_transcription_applies_to_next_recording(
+    tmp_path,
+) -> None:
+    release = threading.Event()
+
+    class BlockingTranscriber(FakeTranscriber):
+        def transcribe(self, audio_path: Path) -> str:
+            release.wait(timeout=5)
+            return super().transcribe(audio_path)
+
+    english = BlockingTranscriber("hello")
+    norwegian = FakeTranscriber("hei")
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=english,
+        language_transcribers={"en": english, "no": norwegian},
+    )
+
+    app.handle_hotkey(tmp_path)
+    app.handle_hotkey(tmp_path)
+    app.select_language("no")
+    release.set()
+    app.wait_for_pending_work()
+
+    assert english.calls == [tmp_path]
+    assert norwegian.calls == []
+
+    app.handle_hotkey(tmp_path)
+    app.handle_hotkey(tmp_path)
+    app.wait_for_pending_work()
+
+    assert norwegian.calls == [tmp_path]
+
+
+def test_unknown_language_is_logged_and_ignored(tmp_path, caplog) -> None:
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=FakeTranscriber(),
+        language_transcribers={"no": FakeTranscriber()},
+    )
+
+    with caplog.at_level(logging.INFO):
+        app.select_language("de")
+
+    assert app.language is None
+    assert caplog.records[0].event == "language_unknown"
+    assert caplog.records[0].language == "de"
+
+
+def test_hotkey_loop_passes_language_selection_to_listener(tmp_path) -> None:
+    norwegian = FakeTranscriber("hei")
+    app = App(
+        recorder=FakeRecorder(),
+        transcriber=FakeTranscriber(),
+        language_transcribers={"no": norwegian},
+    )
+
+    class SelectingListener:
+        def run(
+            self,
+            on_press: Callable[[], None],
+            on_select_language: Callable[[str], None],
+        ) -> None:
+            on_select_language("no")
+            raise KeyboardInterrupt
+
+        def stop(self) -> None:
+            pass
+
+    app.run_hotkey_loop(SelectingListener(), tmp_path)
+
+    assert app.language == "no"
